@@ -23,7 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from db import store_response, load_knowledge_base, get_db
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-AUTO_REPLY_THRESHOLD = float(os.environ.get("AUTO_REPLY_THRESHOLD", "0.85"))
+# Set to 2.0 (impossible) to disable auto-reply — all messages go to human review
+AUTO_REPLY_THRESHOLD = float(os.environ.get("AUTO_REPLY_THRESHOLD", "2.0"))
 
 
 def get_client():
