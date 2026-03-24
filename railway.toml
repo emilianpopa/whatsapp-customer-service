@@ -1,0 +1,6 @@
+[build]
+builder = "nixpacks"
+
+[deploy]
+startCommand = "python web/app.py"
+restartPolicyType = "ON_FAILURE"

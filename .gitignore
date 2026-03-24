@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+venv/
+.venv/
+
+# Environment
+.env
+*.env.local
+
+# WhatsApp session
+.whatsapp_session/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite3
+
+# Logs
+*.log
+
+# Playwright
+.playwright-mcp/

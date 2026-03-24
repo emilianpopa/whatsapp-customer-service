@@ -1,0 +1,15 @@
+[project]
+name = "whatsapp-customer-service"
+version = "0.1.0"
+description = "WhatsApp Customer Service Bot for ExpandHealth — AI-powered message triage and auto-reply"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0",
+    "anthropic>=0.40",
+    "playwright>=1.40",
+    "python-dotenv>=1.0",
+]
+
+[tool.ruff]
+line-length = 100
+select = ["E", "F", "W", "B", "S", "I"]

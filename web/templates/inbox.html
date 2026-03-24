@@ -1,0 +1,297 @@
+{% extends "base.html" %}
+
+{% block title %}Inbox — ExpandHealth WhatsApp{% endblock %}
+
+{% block nav_stats %}
+<div class="stats">
+    {% if stats.pending > 0 %}
+    <span class="stat alert">{{ stats.pending }} pending review</span>
+    {% endif %}
+    {% if stats.new > 0 %}
+    <span class="stat alert">{{ stats.new }} new</span>
+    {% endif %}
+    <span class="stat">{{ stats.auto_replied }} auto-replied</span>
+    <span class="stat">{{ stats.total }} total</span>
+</div>
+{% endblock %}
+
+{% block content %}
+
+<!-- Test Message Form -->
+<details class="test-form">
+    <summary style="cursor:pointer; font-weight:600; margin-bottom:8px;">
+        Send Test Message
+    </summary>
+    <form id="testForm" style="margin-top:12px;">
+        <input type="text" name="sender" placeholder="Sender name (e.g. John Smith)" value="Test Client">
+        <input type="text" name="chat_name" placeholder="Chat name" value="Test Chat">
+        <textarea name="content" placeholder="Message content..."></textarea>
+        <button type="submit" class="btn btn-test">Send Test Message</button>
+    </form>
+</details>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" onclick="showTab('pending')">
+        Needs Review {% if stats.pending > 0 %}({{ stats.pending }}){% endif %}
+    </button>
+    <button class="tab" onclick="showTab('auto')">
+        Auto-Replied ({{ stats.auto_replied }})
+    </button>
+    <button class="tab" onclick="showTab('all')">
+        All Messages ({{ stats.total }})
+    </button>
+</div>
+
+<!-- Pending Review Tab -->
+<div id="tab-pending" class="tab-content">
+    {% if pending %}
+        {% for msg in pending %}
+        <div class="card" id="msg-{{ msg.id }}">
+            <div class="card-header">
+                <span class="sender">{{ msg.sender }}</span>
+                <span class="chat-name">{{ msg.chat_name or '' }}</span>
+                {% if msg.status == 'new' %}
+                <span class="badge badge-new">NEW</span>
+                {% elif msg.status == 'pending_review' %}
+                <span class="badge badge-pending">PENDING</span>
+                {% endif %}
+                <span class="timestamp">{{ msg.timestamp or msg.received_at }}</span>
+            </div>
+            <div class="card-body">
+                <div class="message-text incoming">
+                    {{ msg.content }}
+                </div>
+
+                {% if msg.suggested_text %}
+                <div class="response-box" id="response-box-{{ msg.response_id }}">
+                    <div class="label">AI Suggested Response</div>
+                    <div class="confidence">{{ "%.0f"|format((msg.confidence or 0) * 100) }}% confidence</div>
+                    <div class="response-text" id="response-text-{{ msg.response_id }}">
+                        {{ msg.suggested_text }}
+                    </div>
+                </div>
+                <textarea class="response-edit" id="response-edit-{{ msg.response_id }}"
+                    >{{ msg.suggested_text }}</textarea>
+
+                <div class="actions">
+                    <button class="btn btn-copy" onclick="copyResponse({{ msg.response_id }})">
+                        Copy to Clipboard
+                    </button>
+                    <button class="btn btn-approve" onclick="approveResponse({{ msg.response_id }})">
+                        Approve
+                    </button>
+                    <button class="btn btn-edit" onclick="toggleEdit({{ msg.response_id }})">
+                        Edit
+                    </button>
+                    <button class="btn btn-reject" onclick="rejectResponse({{ msg.response_id }})">
+                        Reject
+                    </button>
+                    <button class="btn btn-regenerate" onclick="regenerate({{ msg.id }})">
+                        Regenerate
+                    </button>
+                    <button class="btn btn-send btn-small" onclick="markSent({{ msg.response_id }})"
+                            style="display:none" id="sent-btn-{{ msg.response_id }}">
+                        Mark as Sent
+                    </button>
+                </div>
+                {% else %}
+                <div class="actions">
+                    <button class="btn btn-regenerate" onclick="regenerate({{ msg.id }})">
+                        Generate Response
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <h3>No messages pending review</h3>
+            <p>New incoming messages will appear here when they need human attention.</p>
+        </div>
+    {% endif %}
+</div>
+
+<!-- Auto-Replied Tab -->
+<div id="tab-auto" class="tab-content" style="display:none;">
+    {% if auto_replied %}
+    <div class="card">
+        {% for msg in auto_replied %}
+        <div class="auto-reply-item">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                <span class="sender">{{ msg.sender }}</span>
+                <span class="badge badge-auto">AUTO</span>
+                <span class="timestamp">{{ msg.timestamp or msg.received_at }}</span>
+            </div>
+            <div class="message-text incoming" style="margin-bottom:6px; font-size:13px;">
+                {{ msg.content }}
+            </div>
+            <div style="font-size:13px; color:#1b5e20; padding-left:8px; border-left:3px solid #00a884;">
+                {{ msg.suggested_text }}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+        <div class="empty-state">
+            <h3>No auto-replies yet</h3>
+            <p>Messages the AI is confident about will be auto-replied and shown here.</p>
+        </div>
+    {% endif %}
+</div>
+
+<!-- All Messages Tab -->
+<div id="tab-all" class="tab-content" style="display:none;">
+    {% if all_messages %}
+        {% for msg in all_messages %}
+        <div class="card" style="margin-bottom:8px;">
+            <div class="card-header" style="padding:8px 16px;">
+                <span class="sender" style="font-size:13px;">{{ msg.sender }}</span>
+                <span class="chat-name">{{ msg.chat_name or '' }}</span>
+                {% if msg.status == 'auto_replied' %}
+                <span class="badge badge-auto">AUTO</span>
+                {% elif msg.status == 'pending_review' %}
+                <span class="badge badge-pending">PENDING</span>
+                {% elif msg.status == 'replied' %}
+                <span class="badge badge-replied">REPLIED</span>
+                {% elif msg.status == 'new' %}
+                <span class="badge badge-new">NEW</span>
+                {% endif %}
+                <span class="timestamp">{{ msg.timestamp or msg.received_at }}</span>
+            </div>
+            <div style="padding:8px 16px; font-size:13px;">
+                {{ msg.content[:200] }}{% if msg.content|length > 200 %}...{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <h3>No messages yet</h3>
+            <p>Start the scanner or send a test message to see messages here.</p>
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(name) {
+    document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+    document.getElementById('tab-' + name).style.display = 'block';
+    event.target.classList.add('active');
+}
+
+async function copyResponse(responseId) {
+    const editArea = document.getElementById('response-edit-' + responseId);
+    const textDiv = document.getElementById('response-text-' + responseId);
+    const text = editArea.style.display !== 'none' ? editArea.value : textDiv.textContent.trim();
+
+    try {
+        await navigator.clipboard.writeText(text);
+        event.target.textContent = 'Copied!';
+        document.getElementById('sent-btn-' + responseId).style.display = 'inline-block';
+        setTimeout(() => { event.target.textContent = 'Copy to Clipboard'; }, 2000);
+    } catch (e) {
+        // Fallback for non-HTTPS
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        event.target.textContent = 'Copied!';
+        document.getElementById('sent-btn-' + responseId).style.display = 'inline-block';
+        setTimeout(() => { event.target.textContent = 'Copy to Clipboard'; }, 2000);
+    }
+}
+
+function toggleEdit(responseId) {
+    const editArea = document.getElementById('response-edit-' + responseId);
+    const responseBox = document.getElementById('response-box-' + responseId);
+    if (editArea.style.display === 'none') {
+        editArea.style.display = 'block';
+        responseBox.style.display = 'none';
+        editArea.focus();
+    } else {
+        editArea.style.display = 'none';
+        responseBox.style.display = 'block';
+    }
+}
+
+async function approveResponse(responseId) {
+    const editArea = document.getElementById('response-edit-' + responseId);
+    const finalText = editArea.style.display !== 'none' ? editArea.value : null;
+    const body = finalText ? { final_text: finalText } : {};
+
+    const res = await fetch('/api/approve/' + responseId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (res.ok) {
+        event.target.textContent = 'Approved!';
+        event.target.disabled = true;
+    }
+}
+
+async function rejectResponse(responseId) {
+    const res = await fetch('/api/reject/' + responseId, { method: 'POST' });
+    if (res.ok) {
+        event.target.textContent = 'Rejected';
+        event.target.disabled = true;
+    }
+}
+
+async function markSent(responseId) {
+    const res = await fetch('/api/sent/' + responseId, { method: 'POST' });
+    if (res.ok) {
+        event.target.textContent = 'Sent!';
+        event.target.disabled = true;
+    }
+}
+
+async function regenerate(messageId) {
+    event.target.textContent = 'Generating...';
+    event.target.disabled = true;
+    const res = await fetch('/api/regenerate/' + messageId, { method: 'POST' });
+    if (res.ok) {
+        location.reload();
+    } else {
+        event.target.textContent = 'Failed — retry';
+        event.target.disabled = false;
+    }
+}
+
+// Test message form
+document.getElementById('testForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const form = new FormData(this);
+    const body = {
+        sender: form.get('sender'),
+        chat_name: form.get('chat_name'),
+        content: form.get('content'),
+    };
+    const btn = this.querySelector('button');
+    btn.textContent = 'Sending...';
+    btn.disabled = true;
+
+    const res = await fetch('/api/test-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (res.ok) {
+        location.reload();
+    } else {
+        btn.textContent = 'Failed — retry';
+        btn.disabled = false;
+    }
+});
+
+// Auto-refresh every 15 seconds
+setInterval(() => { location.reload(); }, 15000);
+</script>
+{% endblock %}
