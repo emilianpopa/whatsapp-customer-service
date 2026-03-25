@@ -186,6 +186,12 @@ def wait_for_login(page):
 
 MAX_CHATS = int(os.environ.get("MAX_CHATS", "30"))  # how many sidebar chats to monitor
 SKIP_GROUPS = os.environ.get("SKIP_GROUPS", "true").lower() in ("1", "true", "yes")
+# Comma-separated list of chat names to always skip (e.g. group chats)
+EXCLUDED_CHATS = {
+    name.strip()
+    for name in os.environ.get("EXCLUDED_CHATS", "").split(",")
+    if name.strip()
+}
 
 # In-memory state: tracks last-seen preview+time per chat to detect new activity
 _chat_last_seen: dict = {}  # {chat_name: (preview, time)}
@@ -394,6 +400,13 @@ def scan_once(page) -> list[dict]:
     if not sidebar:
         log("No chats found in sidebar.")
         return []
+
+    # Skip explicitly excluded chats first
+    if EXCLUDED_CHATS:
+        excluded = [c["chatName"] for c in sidebar if c["chatName"] in EXCLUDED_CHATS]
+        if excluded:
+            log(f"Skipping excluded chat(s): {excluded}")
+        sidebar = [c for c in sidebar if c["chatName"] not in EXCLUDED_CHATS]
 
     # Log all detected chats for debugging
     for c in sidebar:
