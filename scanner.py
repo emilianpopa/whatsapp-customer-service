@@ -336,19 +336,31 @@ def detect_all_groups(page) -> set:
             page.wait_for_timeout(500)
             return set()
 
-        # Collect all chat names now visible — these are all groups
-        names = page.evaluate(r"""
-            () => {
-                const names = new Set();
-                document.querySelectorAll('#pane-side span[title]').forEach(span => {
-                    const name = (span.getAttribute('title') || span.textContent).trim();
-                    if (name && name.length <= 80 && !name.includes('\n') &&
-                        !name.includes('\u202a') && !name.includes('\u202c'))
-                        names.add(name);
-                });
-                return Array.from(names);
-            }
-        """)
+        # Scroll through the Groups filter list to capture ALL groups (not just top viewport)
+        def _collect_names():
+            return page.evaluate(r"""
+                () => {
+                    const names = [];
+                    document.querySelectorAll('#pane-side span[title]').forEach(span => {
+                        const name = (span.getAttribute('title') || span.textContent).trim();
+                        if (name && name.length <= 80 && !name.includes('\n') &&
+                            !name.includes('\u202a') && !name.includes('\u202c'))
+                            names.push(name);
+                    });
+                    return names;
+                }
+            """)
+
+        names = set()
+        for _ in range(15):  # scroll up to 15x to capture all 49+ groups
+            batch = _collect_names()
+            prev_len = len(names)
+            names.update(batch)
+            page.evaluate("const el = document.querySelector('#pane-side'); if (el) el.scrollTop += 600;")
+            page.wait_for_timeout(500)
+            if len(names) == prev_len and len(names) > 0:
+                break  # no new groups loaded — reached the end
+        names = list(names)
 
         # Click "All" to restore the full list
         page.evaluate("""
