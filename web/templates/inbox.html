@@ -37,11 +37,22 @@
         style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;">
 </div>
 
-<!-- Bulk actions -->
-<div style="margin-bottom:8px;text-align:right;">
-    <button onclick="dismissGroups()" style="background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;">
-        ✕ Clear group messages
+<!-- Sort + bulk actions -->
+<div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+    <span style="font-size:12px;color:#666;">Sort:</span>
+    <button id="sort-date" onclick="sortCards('date')"
+            style="background:#00a884;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">
+        By date
     </button>
+    <button id="sort-name" onclick="sortCards('name')"
+            style="background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;">
+        By name
+    </button>
+    <div style="margin-left:auto;">
+        <button onclick="dismissGroups()" style="background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;">
+            ✕ Clear group messages
+        </button>
+    </div>
 </div>
 
 <!-- Tabs -->
@@ -313,6 +324,21 @@ async function markSent(responseId) {
         event.target.textContent = 'Sent!';
         event.target.disabled = true;
     }
+}
+
+function sortCards(mode) {
+    const container = document.getElementById('tab-pending');
+    const cards = Array.from(container.querySelectorAll('.card[id^="msg-"]'));
+    if (mode === 'date') {
+        cards.sort((a, b) => (b.dataset.ts || '').localeCompare(a.dataset.ts || ''));
+    } else {
+        cards.sort((a, b) => (a.dataset.sender || '').localeCompare(b.dataset.sender || ''));
+    }
+    cards.forEach(c => container.appendChild(c));
+    const active = 'background:#00a884;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;';
+    const inactive = 'background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;';
+    document.getElementById('sort-date').style.cssText = mode === 'date' ? active : inactive;
+    document.getElementById('sort-name').style.cssText = mode === 'name' ? active : inactive;
 }
 
 async function dismissGroups() {
