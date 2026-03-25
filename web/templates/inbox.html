@@ -101,11 +101,19 @@
                             style="display:none" id="sent-btn-{{ msg.response_id }}">
                         Mark as Sent
                     </button>
+                    <button class="btn btn-dismiss" onclick="dismissMessage({{ msg.id }})"
+                            style="margin-left:auto;opacity:0.5;font-size:11px;">
+                        ✕ Dismiss
+                    </button>
                 </div>
                 {% else %}
                 <div class="actions">
                     <button class="btn btn-regenerate" onclick="regenerate({{ msg.id }})">
                         Generate Response
+                    </button>
+                    <button class="btn btn-dismiss" onclick="dismissMessage({{ msg.id }})"
+                            style="margin-left:auto;opacity:0.5;font-size:11px;">
+                        ✕ Dismiss
                     </button>
                 </div>
                 {% endif %}
@@ -297,6 +305,16 @@ async function markSent(responseId) {
     if (res.ok) {
         event.target.textContent = 'Sent!';
         event.target.disabled = true;
+    }
+}
+
+async function dismissMessage(messageId) {
+    const card = document.getElementById('msg-' + messageId) || event.target.closest('.card');
+    const res = await fetch('/api/dismiss/' + messageId, { method: 'POST' });
+    if (res.ok && card) {
+        card.style.transition = 'opacity 0.3s';
+        card.style.opacity = '0';
+        setTimeout(() => card.remove(), 300);
     }
 }
 

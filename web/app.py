@@ -105,6 +105,17 @@ def api_reject(response_id):
     return jsonify({"ok": True, "response_id": response_id})
 
 
+@app.route("/api/dismiss/<int:message_id>", methods=["POST"])
+def api_dismiss(message_id):
+    """Permanently delete a message and its responses (e.g. to remove group messages)."""
+    conn = get_db()
+    conn.execute("DELETE FROM responses WHERE message_id = ?", (message_id,))
+    conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 @app.route("/api/sent/<int:response_id>", methods=["POST"])
 def api_mark_sent(response_id):
     """Mark a response as sent (after receptionist copies to WhatsApp)."""

@@ -241,6 +241,9 @@ def get_sidebar_chats(page) -> list[dict]:
                 if (!chatName || seen.has(chatName)) return;
                 if (chatName.length > 80) return;
                 if (chatName.includes('\n') || chatName.includes('\u202a') || chatName.includes('\u202c')) return;
+                // Skip typing indicators and status subtitles (e.g. "~ Glenn is typing...")
+                if (/typing\.\.\.$/i.test(chatName) || /^~\s/.test(chatName)) return;
+                if (/recording audio\.\.\.$/i.test(chatName) || /^online$/i.test(chatName)) return;
                 seen.add(chatName);
 
                 // Walk up to find the chat row container (up to 8 levels)
