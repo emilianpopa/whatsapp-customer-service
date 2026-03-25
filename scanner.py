@@ -201,12 +201,16 @@ def get_sidebar_chats(page) -> list[dict]:
             const results = [];
             const seen = new Set();
 
-            // Find all title spans in the sidebar — these are chat/contact names
+            // Find all title spans in the sidebar — these are chat/contact names.
+            // Filter out message preview spans (they contain newlines or RTL/LTR embedding chars).
             const titleSpans = document.querySelectorAll('#pane-side span[title]');
 
             titleSpans.forEach(titleSpan => {
                 const chatName = (titleSpan.getAttribute('title') || titleSpan.textContent).trim();
+                // Skip empty, already-seen, long strings (previews), or strings with newlines/embedding chars
                 if (!chatName || seen.has(chatName)) return;
+                if (chatName.length > 80) return;
+                if (chatName.includes('\n') || chatName.includes('\u202a') || chatName.includes('\u202c')) return;
                 seen.add(chatName);
 
                 // Walk up to find the chat row container (up to 8 levels)
@@ -255,6 +259,8 @@ def open_chat_and_extract(page, chat_name: str) -> list[dict]:
         '[data-testid="search"]',
         'span[data-icon="search"]',
         '#side [aria-label*="Search"]',
+        '#side [aria-label*="search"]',
+        'button[aria-label*="Search"]',
     ]
 
     for sel in search_btn_selectors:
@@ -267,7 +273,18 @@ def open_chat_and_extract(page, chat_name: str) -> list[dict]:
 
     page.wait_for_timeout(500)
 
-    # Type chat name
+    # Type chat name — extended selectors for newer WhatsApp Web
+    search_selectors = [
+        'div[contenteditable="true"][data-tab="3"]',
+        'div[contenteditable="true"][title="Search or start new chat"]',
+        '#side div[contenteditable="true"]',
+        'p[contenteditable="true"]',
+        '[data-testid="search-input"]',
+        '[aria-label*="Search or start new chat"]',
+        '[aria-label*="Search"]',
+        'div[role="textbox"]',
+    ]
+
     search_input = None
     for sel in search_selectors:
         try:
@@ -424,11 +441,18 @@ def scan_once(page) -> list[dict]:
         if _chat_last_seen.get(name) != key:
             chats_to_open.append(chat)
 
+    # On very first scan, just record current state — don't open every chat
+    if not _chat_last_seen:
+        for chat in sidebar:
+            _chat_last_seen[chat["chatName"]] = (chat["preview"], chat["time"])
+        log(f"Initialised state for {len(sidebar)} chat(s). Will detect changes from next scan.")
+        return []
+
     if not chats_to_open:
         log(f"No new activity across {len(sidebar)} chat(s).")
         return []
 
-    log(f"Activity detected in {len(chats_to_open)} chat(s): {[c['chatName'] for c in chats_to_open]}")
+    log(f"Activity in {len(chats_to_open)} chat(s): {[c['chatName'] for c in chats_to_open]}")
 
     all_candidates = []
     for chat in chats_to_open:
