@@ -199,7 +199,7 @@ def wait_for_login(page):
 
 # ── Message scanning ──────────────────────────────────────────────────────────
 
-MAX_CHATS = int(os.environ.get("MAX_CHATS", "30"))  # how many sidebar chats to monitor
+MAX_CHATS = int(os.environ.get("MAX_CHATS", "60"))  # how many sidebar chats to monitor
 SKIP_GROUPS = os.environ.get("SKIP_GROUPS", "true").lower() in ("1", "true", "yes")
 # Comma-separated list of extra chat names to always skip
 EXCLUDED_CHATS = {
@@ -298,15 +298,6 @@ def detect_all_groups(page) -> set:
         before_count = page.evaluate(
             "() => document.querySelectorAll('#pane-side span[title]').length"
         )
-
-        # Log all button-like elements to debug what text they actually contain
-        debug_btns = page.evaluate("""
-            () => Array.from(document.querySelectorAll('[role="button"], button, [tabindex="0"]'))
-                .map(el => el.textContent.replace(/\\s+/g, ' ').trim().substring(0, 60))
-                .filter(t => t.length > 0)
-                .slice(0, 20)
-        """)
-        log(f"[groups debug] buttons: {debug_btns}")
 
         # Click the "Groups ..." filter pill.
         # Button text is like "\u200eGroups49" — strip invisible Unicode + spaces before matching.
