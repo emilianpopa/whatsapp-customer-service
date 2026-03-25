@@ -299,16 +299,23 @@ def detect_all_groups(page) -> set:
             "() => document.querySelectorAll('#pane-side span[title]').length"
         )
 
-        # Click the "Groups ..." filter pill.
-        # Search ALL elements for one whose full textContent is "Groups" or "Groups N".
-        # This avoids layout-based visibility checks that fail in WhatsApp Web's CSS context.
+        # Log all button-like elements to debug what text they actually contain
+        debug_btns = page.evaluate("""
+            () => Array.from(document.querySelectorAll('[role="button"], button, [tabindex="0"]'))
+                .map(el => el.textContent.replace(/\\s+/g, ' ').trim().substring(0, 60))
+                .filter(t => t.length > 0)
+                .slice(0, 20)
+        """)
+        log(f"[groups debug] buttons: {debug_btns}")
+
+        # Click the "Groups ..." filter pill — search all elements for Groups text
         clicked_text = page.evaluate("""
             () => {
                 const all = Array.from(document.querySelectorAll('*'));
-                const btn = all.find(el => /^Groups(\\s+\\d+)?$/.test(el.textContent.trim()));
+                const btn = all.find(el => /^Groups(\\s+\\d+)?$/.test(el.textContent.replace(/\\s+/g, ' ').trim()));
                 if (!btn) return null;
                 btn.click();
-                return btn.textContent.trim();
+                return btn.textContent.replace(/\s+/g, ' ').trim();
             }
         """)
         if not clicked_text:
