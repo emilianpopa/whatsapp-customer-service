@@ -271,14 +271,33 @@ def get_sidebar_chats(page) -> list[dict]:
 def detect_all_groups(page) -> set:
     """Use WhatsApp Web's Groups filter tab to get a definitive list of all group chat names."""
     try:
-        # Click the "Groups" filter pill in the sidebar
-        # WhatsApp Web renders these as buttons or divs with role=button
+        # Click the "Groups" filter pill in the sidebar.
+        # WhatsApp Web renders these as various element types — search broadly.
         clicked = page.evaluate("""
             () => {
-                const pane = document.querySelector('#pane-side') || document.body;
-                const all = Array.from(pane.querySelectorAll('button, [role="button"], [role="tab"]'));
-                const btn = all.find(el => el.textContent.trim() === 'Groups');
-                if (btn) { btn.click(); return true; }
+                // Walk all text nodes looking for one whose direct text is "Groups"
+                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
+                let node;
+                while ((node = walker.nextNode())) {
+                    if (node.textContent.trim() === 'Groups') {
+                        // Find the nearest clickable ancestor
+                        let el = node.parentElement;
+                        for (let i = 0; i < 5; i++) {
+                            if (!el) break;
+                            const tag = el.tagName;
+                            const role = el.getAttribute('role') || '';
+                            if (tag === 'BUTTON' || role === 'button' || role === 'tab' ||
+                                role === 'listitem' || el.hasAttribute('tabindex')) {
+                                el.click();
+                                return true;
+                            }
+                            el = el.parentElement;
+                        }
+                        // Fallback: click the text node's parent directly
+                        node.parentElement.click();
+                        return true;
+                    }
+                }
                 return false;
             }
         """)
@@ -453,8 +472,9 @@ def scan_once(page) -> list[dict]:
     global _known_groups, _group_detect_counter
     log("Scanning chats...")
 
-    # Refresh group list on first scan and every 10 scans after
-    if SKIP_GROUPS and _group_detect_counter % 10 == 0:
+    # Refresh group list: every scan until we get results, then every 10 scans
+    should_detect = SKIP_GROUPS and (_group_detect_counter % 10 == 0 or not _known_groups - EXCLUDED_CHATS)
+    if should_detect:
         detected = detect_all_groups(page)
         if detected:
             _known_groups = detected | EXCLUDED_CHATS
