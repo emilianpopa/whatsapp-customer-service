@@ -30,6 +30,13 @@
     </form>
 </details>
 
+<!-- Search -->
+<div style="margin-bottom:12px;">
+    <input type="text" id="senderSearch" placeholder="Search by sender or chat name..."
+        oninput="filterCards(this.value)"
+        style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;">
+</div>
+
 <!-- Tabs -->
 <div class="tabs">
     <button class="tab active" onclick="showTab('pending')">
@@ -177,11 +184,27 @@
 
 {% block scripts %}
 <script>
+function filterCards(query) {
+    const q = query.toLowerCase().trim();
+    document.querySelectorAll('.card[id^="msg-"]').forEach(card => {
+        if (!q) { card.style.display = ''; return; }
+        const text = card.innerText.toLowerCase();
+        card.style.display = text.includes(q) ? '' : 'none';
+    });
+    // Also filter rows in all-messages tab
+    document.querySelectorAll('#tab-all .card').forEach(card => {
+        if (!q) { card.style.display = ''; return; }
+        card.style.display = card.innerText.toLowerCase().includes(q) ? '' : 'none';
+    });
+}
+
 function showTab(name) {
     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
     document.getElementById('tab-' + name).style.display = 'block';
     event.target.classList.add('active');
+    // Re-apply search filter after tab switch
+    filterCards(document.getElementById('senderSearch').value);
 }
 
 async function copyResponse(responseId) {
