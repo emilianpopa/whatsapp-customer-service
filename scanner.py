@@ -184,52 +184,42 @@ def wait_for_login(page):
 
 # ── Message scanning ──────────────────────────────────────────────────────────
 
-def extract_unread_chats(page) -> list[dict]:
-    """Find all chats with unread messages and extract the unread messages."""
+MAX_CHATS = int(os.environ.get("MAX_CHATS", "30"))  # how many sidebar chats to monitor
+
+# In-memory state: tracks last-seen preview+time per chat to detect new activity
+_chat_last_seen: dict = {}  # {chat_name: (preview, time)}
+
+
+def get_sidebar_chats(page) -> list[dict]:
+    """Get all visible chats from the sidebar (name, last message preview, timestamp)."""
     return page.evaluate(r"""
         () => {
             const results = [];
-
-            // Find all chat list items with unread badges
-            const chatItems = document.querySelectorAll('#pane-side [role="listitem"], #pane-side [data-testid="cell-frame-container"]');
-
+            const chatItems = document.querySelectorAll(
+                '#pane-side [role="listitem"], #pane-side [data-testid="cell-frame-container"]'
+            );
             chatItems.forEach(item => {
-                // Check for unread badge (green circle with number)
-                const badge = item.querySelector('[data-testid="icon-unread-count"], span[aria-label*="unread"]');
-                if (!badge) {
-                    // Also check for any element that looks like an unread counter
-                    const spans = item.querySelectorAll('span');
-                    let hasUnread = false;
-                    for (const span of spans) {
-                        const text = span.textContent.trim();
-                        if (/^\d+$/.test(text) && span.closest('[style*="background"]')) {
-                            hasUnread = true;
-                            break;
-                        }
-                    }
-                    if (!hasUnread) return;
-                }
+                const titleEl = item.querySelector(
+                    '[data-testid="cell-frame-title"] span, span[title][dir="auto"]'
+                );
+                const chatName = titleEl
+                    ? (titleEl.getAttribute('title') || titleEl.textContent).trim()
+                    : null;
+                if (!chatName) return;
 
-                // Get chat name
-                const titleEl = item.querySelector('[data-testid="cell-frame-title"] span, span[title][dir="auto"]');
-                const chatName = titleEl ? (titleEl.getAttribute('title') || titleEl.textContent).trim() : 'Unknown';
-
-                // Get last message preview
-                const previewEl = item.querySelector('[data-testid="last-msg-status"] span, span[data-testid="msg-text"]');
+                const previewEl = item.querySelector(
+                    'span[data-testid="last-msg-status"], span[data-testid="msg-text"],' +
+                    ' .copyable-text, [data-testid="cell-frame-secondary-text"] span'
+                );
                 const preview = previewEl ? previewEl.textContent.trim() : '';
 
-                // Get timestamp
-                const timeEl = item.querySelector('[data-testid="cell-frame-secondary"] span, div[class] > span[dir="auto"]');
+                const timeEl = item.querySelector(
+                    '[data-testid="cell-frame-secondary"] span'
+                );
                 const time = timeEl ? timeEl.textContent.trim() : '';
 
-                results.push({
-                    chatName: chatName,
-                    preview: preview,
-                    time: time,
-                    element: null  // can't serialize DOM elements
-                });
+                results.push({ chatName, preview, time });
             });
-
             return results;
         }
     """)
@@ -405,21 +395,31 @@ def open_chat_and_extract(page, chat_name: str) -> list[dict]:
 
 
 def scan_once(page) -> list[dict]:
-    """Scan for new unread messages across all chats. Returns new messages found."""
-    log("Scanning for unread messages...")
+    """Scan recent chats for new messages using sidebar state diffing + DB dedup."""
+    log("Scanning chats...")
 
-    unread_chats = extract_unread_chats(page)
-    if not unread_chats:
-        log("No unread messages found.")
+    sidebar = get_sidebar_chats(page)[:MAX_CHATS]
+    if not sidebar:
+        log("No chats found in sidebar.")
         return []
 
-    log(f"Found {len(unread_chats)} chat(s) with unread messages.")
+    # Find chats with changed last-message preview/time
+    chats_to_open = []
+    for chat in sidebar:
+        name = chat["chatName"]
+        key = (chat["preview"], chat["time"])
+        if _chat_last_seen.get(name) != key:
+            chats_to_open.append(chat)
+
+    if not chats_to_open:
+        log(f"No new activity across {len(sidebar)} chat(s).")
+        return []
+
+    log(f"Activity detected in {len(chats_to_open)} chat(s): {[c['chatName'] for c in chats_to_open]}")
+
     all_candidates = []
-
-    for chat in unread_chats:
+    for chat in chats_to_open:
         chat_name = chat["chatName"]
-        log(f"  Opening chat: {chat_name}")
-
         messages = open_chat_and_extract(page, chat_name)
         for msg in messages:
             if msg.get("isOutgoing"):
@@ -433,13 +433,20 @@ def scan_once(page) -> list[dict]:
                 "timestamp": msg.get("timestamp", ""),
                 "chat_name": chat_name,
             })
+        # Update last-seen state after opening
+        _chat_last_seen[chat_name] = (chat["preview"], chat["time"])
+
+    # Also update state for chats we didn't open (no change)
+    for chat in sidebar:
+        name = chat["chatName"]
+        if name not in _chat_last_seen:
+            _chat_last_seen[name] = (chat["preview"], chat["time"])
 
     if not all_candidates:
-        log("Scan complete. 0 new messages.")
+        log("No new incoming messages found.")
         return []
 
     if WEB_SERVICE_URL:
-        # Railway mode: POST to web service API, which handles dedup + AI response
         import urllib.request
         payload = json.dumps({"messages": all_candidates}).encode()
         req = urllib.request.Request(
@@ -452,9 +459,8 @@ def scan_once(page) -> list[dict]:
             result = json.loads(resp.read())
         stored = result.get("stored", 0)
         log(f"Scan complete. {stored} new message(s) ingested via web API.")
-        return []  # scanner doesn't track IDs in Railway mode
+        return []
     else:
-        # Local dev mode: write directly to SQLite
         all_new = []
         for msg in all_candidates:
             if message_exists(msg["sender"], msg["content"], msg["timestamp"]):
@@ -467,7 +473,6 @@ def scan_once(page) -> list[dict]:
                 chat_name=msg["chat_name"],
             )
             all_new.append({"id": msg_id, **msg})
-
         log(f"Scan complete. {len(all_new)} new message(s) total.")
         return all_new
 
