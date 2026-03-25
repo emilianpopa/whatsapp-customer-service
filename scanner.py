@@ -185,6 +185,7 @@ def wait_for_login(page):
 # ── Message scanning ──────────────────────────────────────────────────────────
 
 MAX_CHATS = int(os.environ.get("MAX_CHATS", "30"))  # how many sidebar chats to monitor
+SKIP_GROUPS = os.environ.get("SKIP_GROUPS", "true").lower() in ("1", "true", "yes")
 
 # In-memory state: tracks last-seen preview+time per chat to detect new activity
 _chat_last_seen: dict = {}  # {chat_name: (preview, time)}
@@ -234,7 +235,18 @@ def get_sidebar_chats(page) -> list[dict]:
                 const timeGuess = texts.filter(t => t.length < 20).pop() || '';
                 const preview = texts.filter(t => t !== timeGuess && t !== '(You)').join(' ').slice(0, 100);
 
-                results.push({ chatName, preview, time: timeGuess });
+                // Detect group chats: groups have a group icon SVG (data-testid contains "group")
+                // or an aria-label containing "group" on their avatar element
+                const containerHtml = container.innerHTML || '';
+                const isGroup = !!(
+                    container.querySelector('[data-testid*="default-group"]') ||
+                    container.querySelector('[data-testid*="group-photo"]') ||
+                    container.querySelector('[aria-label*="roup"]') ||
+                    containerHtml.includes('default-group') ||
+                    containerHtml.includes('group-photo')
+                );
+
+                results.push({ chatName, preview, time: timeGuess, isGroup });
             });
 
             return results;
@@ -376,6 +388,13 @@ def scan_once(page) -> list[dict]:
     if not sidebar:
         log("No chats found in sidebar.")
         return []
+
+    # Optionally skip group chats
+    if SKIP_GROUPS:
+        groups = [c["chatName"] for c in sidebar if c.get("isGroup")]
+        if groups:
+            log(f"Skipping {len(groups)} group(s): {groups}")
+        sidebar = [c for c in sidebar if not c.get("isGroup")]
 
     # Find chats with changed last-message preview/time
     chats_to_open = []
