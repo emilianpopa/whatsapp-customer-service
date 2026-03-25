@@ -370,7 +370,7 @@ def detect_all_groups(page) -> set:
         return set()
 
 
-def open_chat_and_extract(page, chat_name: str) -> list[dict]:
+def open_chat_and_extract(page, chat_name: str, scroll_up_times: int = 0) -> list[dict]:
     """Open a specific chat by clicking its title span in the sidebar, then extract messages."""
     # Click directly on the span[title] in the sidebar — no search needed
     escaped = chat_name.replace("\\", "\\\\").replace('"', '\\"')
@@ -389,6 +389,14 @@ def open_chat_and_extract(page, chat_name: str) -> list[dict]:
             return []
 
     page.wait_for_timeout(2000)
+
+    # Scroll up to load older messages (for backfill)
+    for _ in range(scroll_up_times):
+        page.evaluate("""
+            const el = document.querySelector('#main div[role="application"]');
+            if (el) el.scrollTop = 0;
+        """)
+        page.wait_for_timeout(1200)
 
     # Scroll to bottom to see latest messages
     page.evaluate("""
@@ -540,10 +548,11 @@ def scan_once(page) -> list[dict]:
 
     log(f"Activity in {len(chats_to_open)} chat(s): {[c['chatName'] for c in chats_to_open]}")
 
+    is_backfill = not _chat_last_seen  # True only on first scan
     all_candidates = []
     for chat in chats_to_open:
         chat_name = chat["chatName"]
-        messages = open_chat_and_extract(page, chat_name)
+        messages = open_chat_and_extract(page, chat_name, scroll_up_times=5 if is_backfill else 0)
         for msg in messages:
             if msg.get("isOutgoing"):
                 continue

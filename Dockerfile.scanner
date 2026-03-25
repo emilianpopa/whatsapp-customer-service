@@ -42,7 +42,7 @@ RUN playwright install chromium
 
 # ── App code ──────────────────────────────────────────────────────────────────
 # Cache-bust arg: increment when you need to force a fresh COPY layer
-ARG CACHE_BUST=19
+ARG CACHE_BUST=20
 COPY . .
 
 # WhatsApp session directory — mount a Railway volume here to persist it.
