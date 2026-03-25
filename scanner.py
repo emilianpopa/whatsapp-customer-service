@@ -186,7 +186,7 @@ def wait_for_login(page):
 
 MAX_CHATS = int(os.environ.get("MAX_CHATS", "30"))  # how many sidebar chats to monitor
 SKIP_GROUPS = os.environ.get("SKIP_GROUPS", "true").lower() in ("1", "true", "yes")
-# Comma-separated list of chat names to always skip (e.g. group chats)
+# Comma-separated list of extra chat names to always skip
 EXCLUDED_CHATS = {
     name.strip()
     for name in os.environ.get("EXCLUDED_CHATS", "").split(",")
@@ -195,6 +195,8 @@ EXCLUDED_CHATS = {
 
 # In-memory state: tracks last-seen preview+time per chat to detect new activity
 _chat_last_seen: dict = {}  # {chat_name: (preview, time)}
+_known_groups: set = set()  # populated by detect_all_groups()
+_group_detect_counter: int = 0  # refresh group list every N scans
 
 
 def get_sidebar_chats(page) -> list[dict]:
@@ -264,6 +266,60 @@ def get_sidebar_chats(page) -> list[dict]:
             return results;
         }
     """)
+
+
+def detect_all_groups(page) -> set:
+    """Use WhatsApp Web's Groups filter tab to get a definitive list of all group chat names."""
+    try:
+        # Click the "Groups" filter pill in the sidebar
+        # WhatsApp Web renders these as buttons or divs with role=button
+        clicked = page.evaluate("""
+            () => {
+                const pane = document.querySelector('#pane-side') || document.body;
+                const all = Array.from(pane.querySelectorAll('button, [role="button"], [role="tab"]'));
+                const btn = all.find(el => el.textContent.trim() === 'Groups');
+                if (btn) { btn.click(); return true; }
+                return false;
+            }
+        """)
+        if not clicked:
+            log("[groups] Could not find Groups filter tab — skipping auto-detection")
+            return set()
+
+        page.wait_for_timeout(1500)
+
+        # Collect all chat names now visible (they are all groups)
+        names = page.evaluate(r"""
+            () => {
+                const names = new Set();
+                document.querySelectorAll('#pane-side span[title]').forEach(span => {
+                    const name = (span.getAttribute('title') || span.textContent).trim();
+                    if (name && name.length <= 80 && !name.includes('\n') &&
+                        !name.includes('\u202a') && !name.includes('\u202c'))
+                        names.add(name);
+                });
+                return Array.from(names);
+            }
+        """)
+
+        # Click "All" to restore the full list
+        page.evaluate("""
+            () => {
+                const pane = document.querySelector('#pane-side') || document.body;
+                const all = Array.from(pane.querySelectorAll('button, [role="button"], [role="tab"]'));
+                const btn = all.find(el => el.textContent.trim() === 'All');
+                if (btn) btn.click();
+            }
+        """)
+        page.wait_for_timeout(800)
+
+        group_set = set(names)
+        log(f"[groups] Detected {len(group_set)} group(s): {sorted(group_set)}")
+        return group_set
+
+    except Exception as e:
+        log(f"[!] Group detection failed: {e}")
+        return set()
 
 
 def open_chat_and_extract(page, chat_name: str) -> list[dict]:
@@ -394,30 +450,29 @@ def open_chat_and_extract(page, chat_name: str) -> list[dict]:
 
 def scan_once(page) -> list[dict]:
     """Scan recent chats for new messages using sidebar state diffing + DB dedup."""
+    global _known_groups, _group_detect_counter
     log("Scanning chats...")
+
+    # Refresh group list on first scan and every 10 scans after
+    if SKIP_GROUPS and _group_detect_counter % 10 == 0:
+        detected = detect_all_groups(page)
+        if detected:
+            _known_groups = detected | EXCLUDED_CHATS
+        elif not _known_groups:
+            _known_groups = EXCLUDED_CHATS
+    _group_detect_counter += 1
 
     sidebar = get_sidebar_chats(page)[:MAX_CHATS]
     if not sidebar:
         log("No chats found in sidebar.")
         return []
 
-    # Skip explicitly excluded chats first
-    if EXCLUDED_CHATS:
-        excluded = [c["chatName"] for c in sidebar if c["chatName"] in EXCLUDED_CHATS]
-        if excluded:
-            log(f"Skipping excluded chat(s): {excluded}")
-        sidebar = [c for c in sidebar if c["chatName"] not in EXCLUDED_CHATS]
-
-    # Log all detected chats for debugging
-    for c in sidebar:
-        log(f"  Chat: {c['chatName']!r} isGroup={c.get('isGroup', False)}")
-
-    # Optionally skip group chats
-    if SKIP_GROUPS:
-        groups = [c["chatName"] for c in sidebar if c.get("isGroup")]
-        if groups:
-            log(f"Skipping {len(groups)} group(s): {groups}")
-        sidebar = [c for c in sidebar if not c.get("isGroup")]
+    # Skip groups and explicitly excluded chats
+    if SKIP_GROUPS and _known_groups:
+        skipped = [c["chatName"] for c in sidebar if c["chatName"] in _known_groups]
+        if skipped:
+            log(f"Skipping {len(skipped)} group/excluded chat(s): {skipped}")
+        sidebar = [c for c in sidebar if c["chatName"] not in _known_groups]
 
     # Find chats with changed last-message preview/time
     chats_to_open = []
