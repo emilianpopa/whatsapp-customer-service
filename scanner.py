@@ -17,6 +17,7 @@ import sys
 import time
 import threading
 from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
@@ -25,11 +26,68 @@ SESSION_DIR = os.environ.get(
     "WHATSAPP_SESSION_DIR", str(Path.home() / ".whatsapp_session_cs")
 )
 SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "30"))  # seconds
+QR_PORT = int(os.environ.get("PORT", os.environ.get("QR_PORT", 8080)))
 
 # Import db module for message storage
 sys.path.insert(0, str(Path(__file__).parent))
 from db import store_message, message_exists, init_db
 
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+def log(msg: str):
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] {msg}", flush=True)
+
+
+# ── QR login server ───────────────────────────────────────────────────────────
+# Serves screenshots of the WhatsApp QR code so you can scan remotely via browser.
+
+_qr_screenshot: bytes = b""
+_qr_lock = threading.Lock()
+
+_QR_HTML = """<!DOCTYPE html><html><head><title>WhatsApp QR Login</title>
+<meta http-equiv="refresh" content="4"></head>
+<body style="background:#111;display:flex;flex-direction:column;align-items:center;
+justify-content:center;height:100vh;margin:0;font-family:sans-serif;color:#fff;">
+<h2>Scan with WhatsApp</h2>
+<img src="/qr" style="max-width:350px;border-radius:8px;" onerror="this.alt='Waiting for QR...'">
+<p style="color:#aaa;font-size:13px;">Page auto-refreshes every 4 seconds</p>
+</body></html>"""
+
+
+class _QRHandler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass  # suppress access logs
+
+    def do_GET(self):
+        if self.path == "/qr":
+            with _qr_lock:
+                data = _qr_screenshot
+            if data:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_response(503)
+                self.end_headers()
+        else:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(_QR_HTML.encode())
+
+
+def _start_qr_server():
+    server = HTTPServer(("0.0.0.0", QR_PORT), _QRHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
+    log(f"QR server running on port {QR_PORT} — open in browser to scan")
+    return server
+
+
+# ── Browser helpers ───────────────────────────────────────────────────────────
 
 def _remove_browser_locks():
     """Delete stale Chromium profile lock files left by a crashed process."""
@@ -72,7 +130,7 @@ def _wait_for_any(page, selectors: list, timeout_ms: int) -> bool:
 
 
 def wait_for_login(page):
-    """Wait for WhatsApp Web to be ready, prompting QR scan if needed."""
+    """Wait for WhatsApp Web to be ready, serving QR screenshots if login needed."""
     log("Loading WhatsApp Web...")
     page.goto("https://web.whatsapp.com", wait_until="domcontentloaded")
 
@@ -80,16 +138,32 @@ def wait_for_login(page):
         log("[OK] Already logged in.")
         return
 
-    log("=> Please scan the QR code with your phone (you have 5 minutes).")
-    if not _wait_for_any(page, _LOGIN_SELECTORS, timeout_ms=300000):
-        raise PlaywrightTimeout("WhatsApp login timed out after 5 minutes.")
-    log("[OK] Logged in successfully.")
+    log("=> QR scan required. Open the QR server URL in your browser to scan.")
+    _start_qr_server()
+
+    # Poll for login while pushing QR screenshots to the HTTP server
+    end = time.monotonic() + 300
+    while time.monotonic() < end:
+        try:
+            screenshot = page.screenshot()
+            with _qr_lock:
+                global _qr_screenshot
+                _qr_screenshot = screenshot
+        except Exception:
+            pass
+
+        for sel in _LOGIN_SELECTORS:
+            try:
+                page.wait_for_selector(sel, timeout=2000)
+                log("[OK] Logged in successfully.")
+                return
+            except PlaywrightTimeout:
+                pass
+
+    raise PlaywrightTimeout("WhatsApp login timed out after 5 minutes.")
 
 
-def log(msg: str):
-    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[{ts}] {msg}", flush=True)
-
+# ── Message scanning ──────────────────────────────────────────────────────────
 
 def extract_unread_chats(page) -> list[dict]:
     """Find all chats with unread messages and extract the unread messages."""
@@ -368,6 +442,8 @@ def scan_once(page) -> list[dict]:
     return all_new
 
 
+# ── Main entry points ─────────────────────────────────────────────────────────
+
 def run_scanner(once: bool = False):
     """Main scanner loop — opens WhatsApp Web and polls for new messages."""
     init_db()
@@ -386,7 +462,6 @@ def run_scanner(once: bool = False):
 
         if once:
             new_messages = scan_once(page)
-            # Trigger AI responses for new messages
             if new_messages:
                 from responder import process_new_messages
                 process_new_messages(new_messages)
@@ -409,7 +484,7 @@ def run_scanner(once: bool = False):
 
 
 def login_only():
-    """One-time QR login setup."""
+    """One-time QR login setup — used locally, not on Railway."""
     log(f"Opening WhatsApp Web for login setup...")
     log(f"Session will be saved to: {SESSION_DIR}")
     _remove_browser_locks()

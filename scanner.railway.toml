@@ -1,0 +1,10 @@
+# Railway config for the scanner service.
+# The web service uses railway.toml; this file is for the scanner only.
+# In Railway dashboard → scanner service → Settings → Config File Path → scanner.railway.toml
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.scanner"
+
+[deploy]
+restartPolicyType = "on_failure"
