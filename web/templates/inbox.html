@@ -46,7 +46,7 @@
     </button>
     <button id="sort-name" onclick="sortCards('name')"
             style="background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;">
-        By name
+        By person
     </button>
     <div style="margin-left:auto;">
         <button onclick="dismissGroups()" style="background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;">
@@ -329,23 +329,38 @@ async function markSent(responseId) {
 function sortCards(mode) {
     const container = document.getElementById('tab-pending');
     const cards = Array.from(container.querySelectorAll('.card[id^="msg-"]'));
-    cards.sort((a, b) => {
-        if (mode === 'name') {
-            return (a.dataset.sender || '').localeCompare(b.dataset.sender || '');
-        } else {
-            // newest first
-            return (b.dataset.ts || '').localeCompare(a.dataset.ts || '');
-        }
-    });
-    cards.forEach(c => container.appendChild(c));
+
+    if (mode === 'date') {
+        // Strict newest-first
+        cards.sort((a, b) => (b.dataset.ts || '').localeCompare(a.dataset.ts || ''));
+        cards.forEach(c => container.appendChild(c));
+    } else {
+        // By person: group by sender, each group sorted by most recent message first.
+        // Within each group messages appear oldest→newest.
+        const groups = {};
+        cards.forEach(c => {
+            const s = c.dataset.sender || '';
+            if (!groups[s]) groups[s] = [];
+            groups[s].push(c);
+        });
+        // Sort each group internally oldest→newest
+        Object.values(groups).forEach(g => g.sort((a, b) => (a.dataset.ts || '').localeCompare(b.dataset.ts || '')));
+        // Sort groups by their most recent (last) message, newest group first
+        const sortedGroups = Object.values(groups).sort((a, b) => {
+            const aLatest = a[a.length - 1].dataset.ts || '';
+            const bLatest = b[b.length - 1].dataset.ts || '';
+            return bLatest.localeCompare(aLatest);
+        });
+        sortedGroups.flat().forEach(c => container.appendChild(c));
+    }
 
     // Update button styles
-    document.getElementById('sort-date').style.background = mode === 'date' ? '#00a884' : 'none';
-    document.getElementById('sort-date').style.color = mode === 'date' ? '#fff' : '#666';
-    document.getElementById('sort-date').style.border = mode === 'date' ? 'none' : '1px solid #ccc';
-    document.getElementById('sort-name').style.background = mode === 'name' ? '#00a884' : 'none';
-    document.getElementById('sort-name').style.color = mode === 'name' ? '#fff' : '#666';
-    document.getElementById('sort-name').style.border = mode === 'name' ? 'none' : '1px solid #ccc';
+    document.getElementById('sort-date').style.cssText = mode === 'date'
+        ? 'background:#00a884;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;'
+        : 'background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;';
+    document.getElementById('sort-name').style.cssText = mode === 'name'
+        ? 'background:#00a884;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;'
+        : 'background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;';
 }
 
 async function dismissGroups() {
