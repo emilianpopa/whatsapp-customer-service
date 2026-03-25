@@ -245,18 +245,42 @@ function toggleEdit(responseId) {
 }
 
 async function approveResponse(responseId) {
+    const btn = event.target;
     const editArea = document.getElementById('response-edit-' + responseId);
-    const finalText = editArea.style.display !== 'none' ? editArea.value : null;
+    const textDiv = document.getElementById('response-text-' + responseId);
+    // Use whatever text is currently visible (edit area or read-only div)
+    const finalText = (editArea && editArea.style.display !== 'none')
+        ? editArea.value
+        : (textDiv ? textDiv.textContent.trim() : null);
     const body = finalText ? { final_text: finalText } : {};
 
-    const res = await fetch('/api/approve/' + responseId, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-    if (res.ok) {
-        event.target.textContent = 'Approved!';
-        event.target.disabled = true;
+    btn.textContent = 'Approving...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch('/api/approve/' + responseId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (res.ok) {
+            btn.textContent = 'Approved!';
+            // Remove the card from the queue
+            const card = document.getElementById('msg-' + responseId) ||
+                         btn.closest('.card');
+            if (card) card.style.opacity = '0.4';
+            setTimeout(() => location.reload(), 800);
+        } else {
+            const text = await res.text();
+            btn.textContent = 'Error — retry';
+            btn.disabled = false;
+            console.error('Approve failed:', res.status, text);
+            alert('Approve failed (' + res.status + '): ' + text);
+        }
+    } catch (e) {
+        btn.textContent = 'Error — retry';
+        btn.disabled = false;
+        alert('Approve error: ' + e.message);
     }
 }
 

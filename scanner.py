@@ -543,16 +543,25 @@ def scan_once(page) -> list[dict]:
         return []
 
     # Skip groups and explicitly excluded chats (but never skip whitelisted contacts)
-    if SKIP_GROUPS and _known_groups:
+    if SKIP_GROUPS:
         effective_groups = _known_groups - WHITELIST_CHATS
-        skipped = [c["chatName"] for c in sidebar if c["chatName"] in effective_groups]
+
+        def should_skip(c):
+            name = c["chatName"]
+            if name in WHITELIST_CHATS:
+                return False
+            # Primary: JID-based group detection from sidebar (most reliable)
+            if c.get("isGroup"):
+                return True
+            # Secondary: name-based detection from Groups filter tab
+            if name in effective_groups:
+                return True
+            return False
+
+        skipped = [c["chatName"] for c in sidebar if should_skip(c)]
         if skipped:
             log(f"Skipping {len(skipped)} group/excluded chat(s): {skipped}")
-        if WHITELIST_CHATS:
-            kept = [c["chatName"] for c in sidebar if c["chatName"] in WHITELIST_CHATS and c["chatName"] in _known_groups]
-            if kept:
-                log(f"Keeping whitelisted chat(s) despite group detection: {kept}")
-        sidebar = [c for c in sidebar if c["chatName"] not in effective_groups]
+        sidebar = [c for c in sidebar if not should_skip(c)]
 
     # On very first scan, open ALL DM chats for a backfill instead of just initialising state
     if not _chat_last_seen:
