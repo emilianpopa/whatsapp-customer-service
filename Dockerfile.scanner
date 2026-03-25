@@ -41,6 +41,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
 # ── App code ──────────────────────────────────────────────────────────────────
+# Cache-bust arg: increment when you need to force a fresh COPY layer
+ARG CACHE_BUST=2
 COPY . .
 
 # WhatsApp session directory — mount a Railway volume here to persist it.

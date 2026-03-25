@@ -191,58 +191,48 @@ _chat_last_seen: dict = {}  # {chat_name: (preview, time)}
 
 
 def get_sidebar_chats(page) -> list[dict]:
-    """Get all visible chats from the sidebar (name, last message preview, timestamp)."""
-    # First log selector counts to help debug on Railway
-    counts = page.evaluate(r"""
-        () => ({
-            paneListitem: document.querySelectorAll('#pane-side [role="listitem"]').length,
-            allListitem: document.querySelectorAll('[role="listitem"]').length,
-            cellFrame: document.querySelectorAll('[data-testid="cell-frame-container"]').length,
-            paneSide: document.querySelectorAll('#pane-side').length,
-            sideEl: document.querySelectorAll('#side').length,
-            bodyText: document.body ? document.body.innerText.slice(0, 100) : 'no body',
-        })
-    """)
-    log(f"  DOM counts: {counts}")
+    """Get all visible chats from the sidebar (name, last message preview, timestamp).
 
+    Uses span[title] anchors since WhatsApp Web no longer uses role=listitem
+    or data-testid=cell-frame-container in newer versions.
+    """
     return page.evaluate(r"""
         () => {
             const results = [];
-            // Try multiple selector strategies
-            const selectors = [
-                '#pane-side [role="listitem"]',
-                '[data-testid="cell-frame-container"]',
-                'div[role="listitem"]',
-                '#pane-side li',
-            ];
-            let chatItems = null;
-            for (const sel of selectors) {
-                const found = document.querySelectorAll(sel);
-                if (found.length > 0) { chatItems = found; break; }
-            }
-            if (!chatItems || chatItems.length === 0) return results;
+            const seen = new Set();
 
-            chatItems.forEach(item => {
-                const titleEl = item.querySelector(
-                    '[data-testid="cell-frame-title"] span, span[title][dir="auto"], ' +
-                    'span[title], [data-testid="cell-frame-title"]'
-                );
-                const chatName = titleEl
-                    ? (titleEl.getAttribute('title') || titleEl.textContent).trim()
-                    : null;
-                if (!chatName) return;
+            // Find all title spans in the sidebar — these are chat/contact names
+            const titleSpans = document.querySelectorAll('#pane-side span[title]');
 
-                const previewEl = item.querySelector(
-                    'span[data-testid="last-msg-status"], span[data-testid="msg-text"],' +
-                    ' [data-testid="cell-frame-secondary-text"] span, .copyable-text'
-                );
-                const preview = previewEl ? previewEl.textContent.trim() : '';
+            titleSpans.forEach(titleSpan => {
+                const chatName = (titleSpan.getAttribute('title') || titleSpan.textContent).trim();
+                if (!chatName || seen.has(chatName)) return;
+                seen.add(chatName);
 
-                const timeEl = item.querySelector('[data-testid="cell-frame-secondary"] span');
-                const time = timeEl ? timeEl.textContent.trim() : '';
+                // Walk up to find the chat row container (up to 8 levels)
+                let container = titleSpan.parentElement;
+                for (let i = 0; i < 8; i++) {
+                    if (!container) break;
+                    const role = container.getAttribute('role');
+                    const tabindex = container.getAttribute('tabindex');
+                    if (role === 'button' || role === 'listitem' || tabindex === '0') break;
+                    container = container.parentElement;
+                }
+                if (!container) return;
 
-                results.push({ chatName, preview, time });
+                // Grab all text spans to find preview + time
+                const allSpans = Array.from(container.querySelectorAll('span'));
+                const texts = allSpans
+                    .map(s => s.textContent.trim())
+                    .filter(t => t.length > 0 && t !== chatName);
+
+                // Timestamp is usually short (e.g. "Yesterday", "10:30") — heuristic: last short text
+                const timeGuess = texts.filter(t => t.length < 20).pop() || '';
+                const preview = texts.filter(t => t !== timeGuess && t !== '(You)').join(' ').slice(0, 100);
+
+                results.push({ chatName, preview, time: timeGuess });
             });
+
             return results;
         }
     """)
