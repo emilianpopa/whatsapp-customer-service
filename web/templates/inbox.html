@@ -37,6 +37,13 @@
         style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;">
 </div>
 
+<!-- Bulk actions -->
+<div style="margin-bottom:8px;text-align:right;">
+    <button onclick="dismissGroups()" style="background:none;border:1px solid #ccc;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;color:#666;">
+        ✕ Clear group messages
+    </button>
+</div>
+
 <!-- Tabs -->
 <div class="tabs">
     <button class="tab active" onclick="showTab('pending')">
@@ -306,6 +313,12 @@ async function markSent(responseId) {
         event.target.textContent = 'Sent!';
         event.target.disabled = true;
     }
+}
+
+async function dismissGroups() {
+    const res = await fetch('/api/dismiss-groups', { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) location.reload();
 }
 
 async function dismissMessage(messageId) {

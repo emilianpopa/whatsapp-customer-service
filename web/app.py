@@ -107,13 +107,34 @@ def api_reject(response_id):
 
 @app.route("/api/dismiss/<int:message_id>", methods=["POST"])
 def api_dismiss(message_id):
-    """Permanently delete a message and its responses (e.g. to remove group messages)."""
+    """Permanently delete a message and its responses."""
     conn = get_db()
     conn.execute("DELETE FROM responses WHERE message_id = ?", (message_id,))
     conn.execute("DELETE FROM messages WHERE id = ?", (message_id,))
     conn.commit()
     conn.close()
     return jsonify({"ok": True})
+
+
+@app.route("/api/dismiss-groups", methods=["POST"])
+def api_dismiss_groups():
+    """Delete all messages that look like they came from group chats."""
+    conn = get_db()
+    # Match chat names that are typing indicators or group activity text
+    rows = conn.execute("""
+        SELECT id FROM messages
+        WHERE chat_name LIKE '~ %'
+           OR chat_name LIKE '% typing...'
+           OR chat_name LIKE '% is typing...'
+    """).fetchall()
+    ids = [r["id"] for r in rows]
+    if ids:
+        placeholders = ",".join("?" * len(ids))
+        conn.execute(f"DELETE FROM responses WHERE message_id IN ({placeholders})", ids)
+        conn.execute(f"DELETE FROM messages WHERE id IN ({placeholders})", ids)
+        conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "deleted": len(ids)})
 
 
 @app.route("/api/sent/<int:response_id>", methods=["POST"])
