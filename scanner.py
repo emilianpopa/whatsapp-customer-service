@@ -304,7 +304,7 @@ def detect_all_groups(page) -> set:
             log("[groups] Could not find Groups filter tab — skipping auto-detection")
             return set()
 
-        groups_btn.first.click(timeout=3000)
+        groups_btn.first.click(timeout=3000, force=True)
         page.wait_for_timeout(1500)
 
         # Collect all chat names now visible (they are all groups)
@@ -326,7 +326,7 @@ def detect_all_groups(page) -> set:
             has_text=_re.compile(r'^All', _re.IGNORECASE)
         )
         if all_btn.count() > 0:
-            all_btn.first.click(timeout=3000)
+            all_btn.first.click(timeout=3000, force=True)
         page.wait_for_timeout(800)
 
         group_set = set(names)
