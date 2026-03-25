@@ -61,11 +61,13 @@ justify-content:center;height:100vh;margin:0;font-family:sans-serif;color:#fff;"
 </body></html>"""
 
 _LOADING_HTML = """<!DOCTYPE html><html><head><title>WhatsApp Scanner</title>
-<meta http-equiv="refresh" content="5"></head>
+<meta http-equiv="refresh" content="15"></head>
 <body style="background:#111;display:flex;flex-direction:column;align-items:center;
-justify-content:center;height:100vh;margin:0;font-family:sans-serif;color:#fff;">
-<h2>Scanner starting...</h2>
-<p style="color:#aaa;font-size:13px;">Loading WhatsApp Web. Page auto-refreshes every 5 seconds.</p>
+padding:24px;margin:0;font-family:sans-serif;color:#fff;">
+<h2 style="margin-bottom:8px;">&#x2705; Scanner running</h2>
+<p style="color:#aaa;font-size:13px;margin-bottom:16px;">Scanning every 30s &mdash; page refreshes every 15s</p>
+<img src="/screenshot" style="max-width:100%;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.5);"
+     onerror="this.style.display='none'">
 </body></html>"""
 
 _qr_needed = False  # set to True once QR login is required
@@ -303,7 +305,7 @@ def detect_all_groups(page) -> set:
                 const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
                 let node;
                 while ((node = walker.nextNode())) {
-                    if (node.textContent.trim() === 'Groups') {
+                    if (node.textContent.trim().startsWith('Groups')) {
                         // Find the nearest clickable ancestor
                         let el = node.parentElement;
                         for (let i = 0; i < 5; i++) {
@@ -350,7 +352,7 @@ def detect_all_groups(page) -> set:
             () => {
                 const pane = document.querySelector('#pane-side') || document.body;
                 const all = Array.from(pane.querySelectorAll('button, [role="button"], [role="tab"]'));
-                const btn = all.find(el => el.textContent.trim() === 'All');
+                const btn = all.find(el => el.textContent.trim().startsWith('All'));
                 if (btn) btn.click();
             }
         """)
