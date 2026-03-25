@@ -243,76 +243,21 @@ def get_sidebar_chats(page) -> list[dict]:
 
 
 def open_chat_and_extract(page, chat_name: str) -> list[dict]:
-    """Open a specific chat and extract recent messages."""
-    # Search for the chat
-    search_selectors = [
-        'div[contenteditable="true"][data-tab="3"]',
-        'div[contenteditable="true"][title="Search or start new chat"]',
-        '#side div[contenteditable="true"]',
-        'p[contenteditable="true"]',
-        '[data-testid="search-input"]',
-    ]
-
-    # Click search button first
-    search_btn_selectors = [
-        '[data-testid="chat-list-search"]',
-        '[data-testid="search"]',
-        'span[data-icon="search"]',
-        '#side [aria-label*="Search"]',
-        '#side [aria-label*="search"]',
-        'button[aria-label*="Search"]',
-    ]
-
-    for sel in search_btn_selectors:
-        try:
-            el = page.locator(sel).first
-            el.click(timeout=3000)
-            break
-        except Exception:
-            pass
-
-    page.wait_for_timeout(500)
-
-    # Type chat name — extended selectors for newer WhatsApp Web
-    search_selectors = [
-        'div[contenteditable="true"][data-tab="3"]',
-        'div[contenteditable="true"][title="Search or start new chat"]',
-        '#side div[contenteditable="true"]',
-        'p[contenteditable="true"]',
-        '[data-testid="search-input"]',
-        '[aria-label*="Search or start new chat"]',
-        '[aria-label*="Search"]',
-        'div[role="textbox"]',
-    ]
-
-    search_input = None
-    for sel in search_selectors:
-        try:
-            el = page.locator(sel).first
-            el.wait_for(state="visible", timeout=2000)
-            search_input = el
-            break
-        except Exception:
-            pass
-
-    if not search_input:
-        log(f"[!] Could not find search input for chat: {chat_name}")
-        return []
-
-    search_input.fill(chat_name)
-    page.wait_for_timeout(1500)
-
-    # Click the chat result
+    """Open a specific chat by clicking its title span in the sidebar, then extract messages."""
+    # Click directly on the span[title] in the sidebar — no search needed
     escaped = chat_name.replace("\\", "\\\\").replace('"', '\\"')
-    exact = page.locator(f'span[title="{escaped}"]').first
-    if exact.count() > 0:
-        exact.click()
-    else:
-        results = page.locator('[data-testid="cell-frame-title"]').filter(has_text=chat_name)
-        if results.count() > 0:
-            results.first.click()
-        else:
-            log(f"[!] Chat not found: {chat_name}")
+    title_span = page.locator(f'#pane-side span[title="{escaped}"]').first
+    try:
+        title_span.wait_for(state="visible", timeout=3000)
+        title_span.click()
+    except Exception:
+        # Fallback: press Escape to close any open panel, then retry
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+            title_span.click(timeout=3000)
+        except Exception:
+            log(f"[!] Could not open chat: {chat_name}")
             return []
 
     page.wait_for_timeout(2000)
@@ -413,11 +358,10 @@ def open_chat_and_extract(page, chat_name: str) -> list[dict]:
         }
     """)
 
-    # Clear search to go back to chat list
+    # Press Escape to close the chat and return to the chat list
     try:
         page.keyboard.press("Escape")
-        page.wait_for_timeout(500)
-        page.keyboard.press("Escape")
+        page.wait_for_timeout(300)
     except Exception:
         pass
 
