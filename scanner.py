@@ -294,20 +294,50 @@ def detect_all_groups(page) -> set:
         except Exception:
             pass
 
-        # Use Playwright locator — handles React rendering better than raw JS TreeWalker
-        import re as _re
-        groups_btn = page.locator('[role="button"], button').filter(
-            has_text=_re.compile(r'Groups', _re.IGNORECASE)
+        # Count chats before filtering so we can verify the click worked
+        before_count = page.evaluate(
+            "() => document.querySelectorAll('#pane-side span[title]').length"
         )
-        count = groups_btn.count()
-        if count == 0:
-            log("[groups] Could not find Groups filter tab — skipping auto-detection")
+
+        # Click the visible "Groups ..." filter pill using JS dispatchEvent
+        # (Playwright force=True can hit hidden elements; this targets only visible ones)
+        clicked_text = page.evaluate("""
+            () => {
+                const btns = Array.from(document.querySelectorAll('[role="button"], button'));
+                const btn = btns.find(el =>
+                    el.offsetParent !== null &&
+                    /^Groups/.test(el.textContent.trim())
+                );
+                if (!btn) return null;
+                btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                return btn.textContent.trim();
+            }
+        """)
+        if not clicked_text:
+            log("[groups] Could not find visible Groups filter tab — skipping auto-detection")
             return set()
 
-        groups_btn.first.click(timeout=3000, force=True)
         page.wait_for_timeout(1500)
 
-        # Collect all chat names now visible (they are all groups)
+        # Verify the filter actually changed (fewer chats visible)
+        after_count = page.evaluate(
+            "() => document.querySelectorAll('#pane-side span[title]').length"
+        )
+        log(f"[groups] Filter click: '{clicked_text}' — chats before={before_count} after={after_count}")
+        if after_count >= before_count:
+            log("[groups] Filter did not change chat list — skipping auto-detection")
+            # Restore "All" anyway
+            page.evaluate("""
+                () => {
+                    const btn = Array.from(document.querySelectorAll('[role="button"], button'))
+                        .find(el => el.offsetParent !== null && /^All/.test(el.textContent.trim()));
+                    if (btn) btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                }
+            """)
+            page.wait_for_timeout(500)
+            return set()
+
+        # Collect all chat names now visible — these are all groups
         names = page.evaluate(r"""
             () => {
                 const names = new Set();
@@ -322,11 +352,13 @@ def detect_all_groups(page) -> set:
         """)
 
         # Click "All" to restore the full list
-        all_btn = page.locator('[role="button"], button').filter(
-            has_text=_re.compile(r'^All', _re.IGNORECASE)
-        )
-        if all_btn.count() > 0:
-            all_btn.first.click(timeout=3000, force=True)
+        page.evaluate("""
+            () => {
+                const btn = Array.from(document.querySelectorAll('[role="button"], button'))
+                    .find(el => el.offsetParent !== null && /^All/.test(el.textContent.trim()));
+                if (btn) btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+            }
+        """)
         page.wait_for_timeout(800)
 
         group_set = set(names)
