@@ -153,7 +153,7 @@ def process_new_messages(messages: list[dict]):
 
             store_response(
                 message_id=msg_id,
-                suggested_text=reply_text,
+                suggested_text=reply_text or "[No response generated]",
                 confidence=confidence,
                 auto_reply=auto_reply,
             )
