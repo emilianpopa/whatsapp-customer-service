@@ -314,8 +314,8 @@ document.getElementById('testForm').addEventListener('submit', async function(e)
     }
 });
 
-// Auto-refresh every 15 seconds — paused while any textarea is focused
-let _refreshTimer = setInterval(() => { location.reload(); }, 15000);
+// Auto-refresh every 5 minutes — paused while any textarea is focused
+let _refreshTimer = setInterval(() => { location.reload(); }, 300000);
 document.addEventListener('focusin', e => {
     if (e.target.tagName === 'TEXTAREA') clearInterval(_refreshTimer);
 });
