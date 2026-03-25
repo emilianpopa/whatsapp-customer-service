@@ -308,14 +308,16 @@ def detect_all_groups(page) -> set:
         """)
         log(f"[groups debug] buttons: {debug_btns}")
 
-        # Click the "Groups ..." filter pill — search all elements for Groups text
+        # Click the "Groups ..." filter pill.
+        # Button text is like "\u200eGroups49" — strip invisible Unicode + spaces before matching.
         clicked_text = page.evaluate("""
             () => {
+                const clean = t => t.replace(/[\\u200e\\u200f\\u202a\\u202c\\s]/g, '');
                 const all = Array.from(document.querySelectorAll('*'));
-                const btn = all.find(el => /^Groups(\\s+\\d+)?$/.test(el.textContent.replace(/\\s+/g, ' ').trim()));
+                const btn = all.find(el => /^Groups\\d*$/.test(clean(el.textContent)));
                 if (!btn) return null;
                 btn.click();
-                return btn.textContent.replace(/\s+/g, ' ').trim();
+                return btn.textContent;
             }
         """)
         if not clicked_text:
@@ -334,8 +336,9 @@ def detect_all_groups(page) -> set:
             # Restore "All" anyway
             page.evaluate("""
                 () => {
+                    const clean = t => t.replace(/[\\u200e\\u200f\\u202a\\u202c\\s]/g, '');
                     const btn = Array.from(document.querySelectorAll('*'))
-                        .find(el => /^All(\\s+\\d+)?$/.test(el.textContent.trim()));
+                        .find(el => /^All\\d*$/.test(clean(el.textContent)));
                     if (btn) btn.click();
                 }
             """)
@@ -359,8 +362,9 @@ def detect_all_groups(page) -> set:
         # Click "All" to restore the full list
         page.evaluate("""
             () => {
+                const clean = t => t.replace(/[\\u200e\\u200f\\u202a\\u202c\\s]/g, '');
                 const btn = Array.from(document.querySelectorAll('*'))
-                    .find(el => /^All(\\s+\\d+)?$/.test(el.textContent.trim()));
+                    .find(el => /^All\\d*$/.test(clean(el.textContent)));
                 if (btn) btn.click();
             }
         """)
