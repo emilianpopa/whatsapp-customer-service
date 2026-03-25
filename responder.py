@@ -111,24 +111,41 @@ def generate_response(sender: str, content: str, chat_name: str = None,
         messages=[{"role": "user", "content": user_message}],
     )
 
-    # Parse the JSON response
+    # Parse the JSON response — Claude sometimes adds text before/after the JSON object
     raw_text = response.content[0].text.strip()
-    # Handle potential markdown code fences
-    if raw_text.startswith("```"):
-        raw_text = raw_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
+    # Strip markdown code fences if present
+    if "```" in raw_text:
+        import re
+        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_text, re.DOTALL)
+        if fence_match:
+            raw_text = fence_match.group(1)
+
+    # Try direct parse first
     try:
         result = json.loads(raw_text)
+        return result
     except json.JSONDecodeError:
-        result = {
-            "reply": raw_text,
-            "confidence": 0.5,
-            "category": "general",
-            "auto_safe": False,
-            "reasoning": "Could not parse structured response",
-        }
+        pass
 
-    return result
+    # Extract the first {...} JSON object from anywhere in the text
+    import re
+    json_match = re.search(r"\{.*\}", raw_text, re.DOTALL)
+    if json_match:
+        try:
+            result = json.loads(json_match.group(0))
+            return result
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: use the raw text as the reply
+    return {
+        "reply": raw_text,
+        "confidence": 0.5,
+        "category": "general",
+        "auto_safe": False,
+        "reasoning": "Could not parse structured response",
+    }
 
 
 def process_new_messages(messages: list[dict]):
