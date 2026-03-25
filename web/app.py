@@ -98,6 +98,23 @@ def api_approve(response_id):
     return jsonify({"ok": True, "response_id": response_id})
 
 
+@app.route("/api/admin/fix-timestamps", methods=["POST"])
+def fix_timestamps():
+    """One-time: update received_at to parsed WhatsApp timestamp for correct date ordering."""
+    from db import _parse_whatsapp_timestamp
+    conn = get_db()
+    rows = conn.execute("SELECT id, timestamp FROM messages WHERE timestamp IS NOT NULL").fetchall()
+    updated = 0
+    for row in rows:
+        parsed = _parse_whatsapp_timestamp(row["timestamp"])
+        if parsed:
+            conn.execute("UPDATE messages SET received_at = ? WHERE id = ?", (parsed, row["id"]))
+            updated += 1
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "updated": updated})
+
+
 @app.route("/api/reject/<int:response_id>", methods=["POST"])
 def api_reject(response_id):
     """Reject a suggested response."""
