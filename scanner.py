@@ -523,20 +523,16 @@ def scan_once(page) -> list[dict]:
             log(f"Skipping {len(skipped)} group/excluded chat(s): {skipped}")
         sidebar = [c for c in sidebar if c["chatName"] not in _known_groups]
 
-    # Find chats with changed last-message preview/time
-    chats_to_open = []
-    for chat in sidebar:
-        name = chat["chatName"]
-        key = (chat["preview"], chat["time"])
-        if _chat_last_seen.get(name) != key:
-            chats_to_open.append(chat)
-
-    # On very first scan, just record current state — don't open every chat
+    # On very first scan, open ALL DM chats for a backfill instead of just initialising state
     if not _chat_last_seen:
-        for chat in sidebar:
-            _chat_last_seen[chat["chatName"]] = (chat["preview"], chat["time"])
-        log(f"Initialised state for {len(sidebar)} chat(s). Will detect changes from next scan.")
-        return []
+        log(f"First scan — backfilling {len(sidebar)} DM chat(s)...")
+        chats_to_open = list(sidebar)
+    else:
+        # Find chats with changed last-message preview/time
+        chats_to_open = [
+            chat for chat in sidebar
+            if _chat_last_seen.get(chat["chatName"]) != (chat["preview"], chat["time"])
+        ]
 
     if not chats_to_open:
         log(f"No new activity across {len(sidebar)} chat(s).")
