@@ -27,10 +27,14 @@ SESSION_DIR = os.environ.get(
 )
 SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "30"))  # seconds
 QR_PORT = int(os.environ.get("PORT", os.environ.get("QR_PORT", 8080)))
+# When running as a separate Railway service, post messages to the web service API.
+# Set to empty string or omit to write directly to SQLite (local dev mode).
+WEB_SERVICE_URL = os.environ.get("WEB_SERVICE_URL", "").rstrip("/")
 
-# Import db module for message storage
-sys.path.insert(0, str(Path(__file__).parent))
-from db import store_message, message_exists, init_db
+if not WEB_SERVICE_URL:
+    # Local dev: write directly to SQLite
+    sys.path.insert(0, str(Path(__file__).parent))
+    from db import store_message, message_exists, init_db
 
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -395,58 +399,70 @@ def scan_once(page) -> list[dict]:
         return []
 
     log(f"Found {len(unread_chats)} chat(s) with unread messages.")
-    all_new = []
+    all_candidates = []
 
     for chat in unread_chats:
         chat_name = chat["chatName"]
         log(f"  Opening chat: {chat_name}")
 
         messages = open_chat_and_extract(page, chat_name)
-        new_count = 0
-
         for msg in messages:
             if msg.get("isOutgoing"):
-                continue  # Skip our own messages
-
-            sender = msg.get("sender", "Unknown")
+                continue
             content = msg.get("text", "")
-            timestamp = msg.get("timestamp", "")
-
             if not content:
                 continue
-
-            # Dedup check
-            if message_exists(sender, content, timestamp):
-                continue
-
-            msg_id = store_message(
-                sender=sender,
-                content=content,
-                timestamp=timestamp,
-                is_outgoing=False,
-                chat_name=chat_name,
-            )
-            all_new.append({
-                "id": msg_id,
-                "sender": sender,
+            all_candidates.append({
+                "sender": msg.get("sender", "Unknown"),
                 "content": content,
-                "timestamp": timestamp,
+                "timestamp": msg.get("timestamp", ""),
                 "chat_name": chat_name,
             })
-            new_count += 1
 
-        if new_count:
-            log(f"  [{chat_name}] {new_count} new message(s) stored.")
+    if not all_candidates:
+        log("Scan complete. 0 new messages.")
+        return []
 
-    log(f"Scan complete. {len(all_new)} new message(s) total.")
-    return all_new
+    if WEB_SERVICE_URL:
+        # Railway mode: POST to web service API, which handles dedup + AI response
+        import urllib.request
+        payload = json.dumps({"messages": all_candidates}).encode()
+        req = urllib.request.Request(
+            f"{WEB_SERVICE_URL}/api/ingest",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+        stored = result.get("stored", 0)
+        log(f"Scan complete. {stored} new message(s) ingested via web API.")
+        return []  # scanner doesn't track IDs in Railway mode
+    else:
+        # Local dev mode: write directly to SQLite
+        all_new = []
+        for msg in all_candidates:
+            if message_exists(msg["sender"], msg["content"], msg["timestamp"]):
+                continue
+            msg_id = store_message(
+                sender=msg["sender"],
+                content=msg["content"],
+                timestamp=msg["timestamp"],
+                is_outgoing=False,
+                chat_name=msg["chat_name"],
+            )
+            all_new.append({"id": msg_id, **msg})
+
+        log(f"Scan complete. {len(all_new)} new message(s) total.")
+        return all_new
 
 
 # ── Main entry points ─────────────────────────────────────────────────────────
 
 def run_scanner(once: bool = False):
     """Main scanner loop — opens WhatsApp Web and polls for new messages."""
-    init_db()
+    if not WEB_SERVICE_URL:
+        init_db()
     _remove_browser_locks()
 
     with sync_playwright() as p:
@@ -462,7 +478,7 @@ def run_scanner(once: bool = False):
 
         if once:
             new_messages = scan_once(page)
-            if new_messages:
+            if new_messages and not WEB_SERVICE_URL:
                 from responder import process_new_messages
                 process_new_messages(new_messages)
         else:
@@ -470,7 +486,7 @@ def run_scanner(once: bool = False):
             while True:
                 try:
                     new_messages = scan_once(page)
-                    if new_messages:
+                    if new_messages and not WEB_SERVICE_URL:
                         from responder import process_new_messages
                         process_new_messages(new_messages)
                 except KeyboardInterrupt:

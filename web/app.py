@@ -12,6 +12,7 @@ Receptionist-facing UI for:
 import os
 import sys
 import json
+import threading
 from pathlib import Path
 from datetime import datetime
 
@@ -115,6 +116,40 @@ def api_regenerate(message_id):
         auto_reply=False,  # regenerated = always needs review
     )
     return jsonify({"ok": True, "response_id": resp_id, "response": result})
+
+
+@app.route("/api/ingest", methods=["POST"])
+def api_ingest():
+    """Ingest raw messages from the scanner service (internal use).
+
+    Accepts a list of messages, deduplicates, stores, and triggers AI response generation.
+    Used when scanner runs as a separate Railway service and can't write to SQLite directly.
+    """
+    from db import message_exists
+    data = request.get_json()
+    messages = data.get("messages", [])
+    if not messages:
+        return jsonify({"error": "messages is required"}), 400
+
+    new_messages = []
+    for msg in messages:
+        sender = msg.get("sender", "Unknown")
+        content = msg.get("content", "")
+        timestamp = msg.get("timestamp", "")
+        chat_name = msg.get("chat_name", "")
+        if not content:
+            continue
+        if message_exists(sender, content, timestamp):
+            continue
+        msg_id = store_message(sender=sender, content=content, timestamp=timestamp,
+                               is_outgoing=False, chat_name=chat_name)
+        new_messages.append({"id": msg_id, "sender": sender, "content": content,
+                              "chat_name": chat_name})
+
+    if new_messages:
+        threading.Thread(target=process_new_messages, args=(new_messages,), daemon=True).start()
+
+    return jsonify({"ok": True, "stored": len(new_messages), "skipped": len(messages) - len(new_messages)})
 
 
 @app.route("/api/test-message", methods=["POST"])
