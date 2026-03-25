@@ -152,6 +152,17 @@ def api_ingest():
     return jsonify({"ok": True, "stored": len(new_messages), "skipped": len(messages) - len(new_messages)})
 
 
+@app.route("/api/admin/reset-messages", methods=["POST"])
+def api_reset_messages():
+    """Delete all messages and responses. One-time cleanup endpoint."""
+    conn = get_db()
+    conn.execute("DELETE FROM responses")
+    conn.execute("DELETE FROM messages")
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "message": "All messages and responses deleted."})
+
+
 @app.route("/api/test-message", methods=["POST"])
 def api_test_message():
     """Simulate an incoming message for testing."""
