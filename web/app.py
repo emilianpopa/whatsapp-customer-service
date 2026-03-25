@@ -156,17 +156,6 @@ def api_ingest():
 
 
 
-@app.route("/api/admin/reset-messages", methods=["POST"])
-def api_reset_messages():
-    """Wipe all messages and responses — temporary admin endpoint."""
-    conn = get_db()
-    conn.execute("DELETE FROM responses")
-    conn.execute("DELETE FROM messages")
-    conn.commit()
-    conn.close()
-    return jsonify({"ok": True, "message": "All messages and responses deleted"})
-
-
 @app.route("/api/test-message", methods=["POST"])
 def api_test_message():
     """Simulate an incoming message for testing."""
