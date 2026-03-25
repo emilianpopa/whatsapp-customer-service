@@ -235,16 +235,22 @@ def get_sidebar_chats(page) -> list[dict]:
                 const timeGuess = texts.filter(t => t.length < 20).pop() || '';
                 const preview = texts.filter(t => t !== timeGuess && t !== '(You)').join(' ').slice(0, 100);
 
-                // Detect group chats: groups have a group icon SVG (data-testid contains "group")
-                // or an aria-label containing "group" on their avatar element
-                const containerHtml = container.innerHTML || '';
-                const isGroup = !!(
-                    container.querySelector('[data-testid*="default-group"]') ||
-                    container.querySelector('[data-testid*="group-photo"]') ||
-                    container.querySelector('[aria-label*="roup"]') ||
-                    containerHtml.includes('default-group') ||
-                    containerHtml.includes('group-photo')
-                );
+                // Detect group chats using WhatsApp JID: group IDs end in @g.us, DMs end in @c.us.
+                // Walk up to find any element with data-id containing the JID.
+                let isGroup = false;
+                let el2 = container;
+                for (let i = 0; i < 12; i++) {
+                    if (!el2) break;
+                    const dataId = el2.getAttribute('data-id') || el2.getAttribute('data-jid') || '';
+                    if (dataId.includes('@g.us')) { isGroup = true; break; }
+                    if (dataId.includes('@c.us') || dataId.includes('@s.whatsapp.net')) { isGroup = false; break; }
+                    el2 = el2.parentElement;
+                }
+                // Fallback: check for group icon if JID not found
+                if (!isGroup) {
+                    const containerHtml = container.innerHTML || '';
+                    isGroup = containerHtml.includes('default-group') || containerHtml.includes('group-photo');
+                }
 
                 results.push({ chatName, preview, time: timeGuess, isGroup });
             });
@@ -388,6 +394,10 @@ def scan_once(page) -> list[dict]:
     if not sidebar:
         log("No chats found in sidebar.")
         return []
+
+    # Log all detected chats for debugging
+    for c in sidebar:
+        log(f"  Chat: {c['chatName']!r} isGroup={c.get('isGroup', False)}")
 
     # Optionally skip group chats
     if SKIP_GROUPS:
