@@ -299,17 +299,15 @@ def detect_all_groups(page) -> set:
             "() => document.querySelectorAll('#pane-side span[title]').length"
         )
 
-        # Click the visible "Groups ..." filter pill using JS dispatchEvent
-        # (Playwright force=True can hit hidden elements; this targets only visible ones)
+        # Click the "Groups ..." filter pill.
+        # Search ALL elements for one whose full textContent is "Groups" or "Groups N".
+        # This avoids layout-based visibility checks that fail in WhatsApp Web's CSS context.
         clicked_text = page.evaluate("""
             () => {
-                const btns = Array.from(document.querySelectorAll('[role="button"], button'));
-                const btn = btns.find(el =>
-                    el.offsetParent !== null &&
-                    /^Groups/.test(el.textContent.trim())
-                );
+                const all = Array.from(document.querySelectorAll('*'));
+                const btn = all.find(el => /^Groups(\\s+\\d+)?$/.test(el.textContent.trim()));
                 if (!btn) return null;
-                btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                btn.click();
                 return btn.textContent.trim();
             }
         """)
@@ -329,9 +327,9 @@ def detect_all_groups(page) -> set:
             # Restore "All" anyway
             page.evaluate("""
                 () => {
-                    const btn = Array.from(document.querySelectorAll('[role="button"], button'))
-                        .find(el => el.offsetParent !== null && /^All/.test(el.textContent.trim()));
-                    if (btn) btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                    const btn = Array.from(document.querySelectorAll('*'))
+                        .find(el => /^All(\\s+\\d+)?$/.test(el.textContent.trim()));
+                    if (btn) btn.click();
                 }
             """)
             page.wait_for_timeout(500)
@@ -354,9 +352,9 @@ def detect_all_groups(page) -> set:
         # Click "All" to restore the full list
         page.evaluate("""
             () => {
-                const btn = Array.from(document.querySelectorAll('[role="button"], button'))
-                    .find(el => el.offsetParent !== null && /^All/.test(el.textContent.trim()));
-                if (btn) btn.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                const btn = Array.from(document.querySelectorAll('*'))
+                    .find(el => /^All(\\s+\\d+)?$/.test(el.textContent.trim()));
+                if (btn) btn.click();
             }
         """)
         page.wait_for_timeout(800)
