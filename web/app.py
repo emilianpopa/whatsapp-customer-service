@@ -42,7 +42,8 @@ def ensure_db():
 @app.route("/")
 def index():
     """Main dashboard — pending review queue."""
-    pending = get_pending_messages()
+    hours = int(request.args.get("hours", 48))
+    pending = get_pending_messages(hours=hours)
     auto_replied = get_auto_replied()
     all_msgs = get_all_messages(limit=50)
 
@@ -54,7 +55,7 @@ def index():
     }
 
     return render_template("inbox.html", pending=pending, auto_replied=auto_replied,
-                           all_messages=all_msgs, stats=stats)
+                           all_messages=all_msgs, stats=stats, hours=hours)
 
 
 # ── API endpoints ─────────────────────────────────────────────────────────────

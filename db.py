@@ -115,8 +115,8 @@ def store_response(message_id: int, suggested_text: str,
     return resp_id
 
 
-def get_pending_messages() -> list[dict]:
-    """Get messages awaiting review (with their latest suggested response)."""
+def get_pending_messages(hours: int = 48) -> list[dict]:
+    """Get messages awaiting review (with their latest suggested response), last N hours."""
     conn = get_db()
     rows = conn.execute("""
         SELECT m.id, m.sender, m.content, m.timestamp, m.received_at, m.chat_name, m.status,
@@ -126,8 +126,9 @@ def get_pending_messages() -> list[dict]:
             SELECT id FROM responses WHERE message_id = m.id ORDER BY created_at DESC LIMIT 1
         )
         WHERE m.status IN ('new', 'pending_review')
+          AND m.received_at >= datetime('now', ? || ' hours')
         ORDER BY m.received_at DESC
-    """).fetchall()
+    """, (f"-{hours}",)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

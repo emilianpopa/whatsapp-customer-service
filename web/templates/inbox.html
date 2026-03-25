@@ -37,9 +37,25 @@
         style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;box-sizing:border-box;">
 </div>
 
-<!-- Sort + bulk actions -->
-<div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;">
-    <span style="font-size:12px;color:#666;">Sort:</span>
+<!-- Filter + sort + bulk actions -->
+<div style="margin-bottom:8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="font-size:12px;color:#666;">Show:</span>
+    <a href="/?hours=24" style="text-decoration:none;">
+        <button style="{{ 'background:#00a884;color:#fff;border:none;' if hours==24 else 'background:none;border:1px solid #ccc;color:#666;' }}border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">
+            Last 24h
+        </button>
+    </a>
+    <a href="/?hours=48" style="text-decoration:none;">
+        <button style="{{ 'background:#00a884;color:#fff;border:none;' if hours==48 else 'background:none;border:1px solid #ccc;color:#666;' }}border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">
+            Last 48h
+        </button>
+    </a>
+    <a href="/?hours=720" style="text-decoration:none;">
+        <button style="{{ 'background:#00a884;color:#fff;border:none;' if hours==720 else 'background:none;border:1px solid #ccc;color:#666;' }}border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">
+            All
+        </button>
+    </a>
+    <span style="font-size:12px;color:#666;margin-left:8px;">Sort:</span>
     <button id="sort-date" onclick="sortCards('date')"
             style="background:#00a884;color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">
         By date
