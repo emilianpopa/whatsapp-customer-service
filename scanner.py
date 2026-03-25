@@ -522,6 +522,85 @@ def open_chat_and_extract(page, chat_name: str, scroll_up_times: int = 0) -> lis
     return messages
 
 
+def send_whatsapp_message(page, chat_name: str, text: str) -> bool:
+    """Open a chat in WhatsApp Web and send a message. Returns True on success."""
+    escaped = chat_name.replace("\\", "\\\\").replace('"', '\\"')
+    title_span = page.locator(f'#pane-side span[title="{escaped}"]').first
+    try:
+        title_span.wait_for(state="visible", timeout=5000)
+        title_span.click()
+    except Exception:
+        log(f"[send] Could not open chat '{chat_name}' to send message")
+        return False
+
+    page.wait_for_timeout(2000)
+
+    # Find the message compose box
+    input_box = page.locator('[data-testid="conversation-compose-box-input"]').first
+    if not input_box.is_visible(timeout=3000):
+        input_box = page.locator('div[contenteditable="true"][data-tab="10"]').first
+
+    try:
+        input_box.click(timeout=3000)
+    except Exception:
+        log(f"[send] Could not focus input box for chat '{chat_name}'")
+        return False
+
+    # Type message — use Shift+Enter for line breaks, Enter to send
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        page.keyboard.type(line, delay=10)
+        if i < len(lines) - 1:
+            page.keyboard.press("Shift+Enter")
+
+    page.wait_for_timeout(300)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(1500)
+
+    log(f"[send] Sent message to '{chat_name}': {text[:60]}...")
+    return True
+
+
+def send_approved_responses(page):
+    """Poll the web service for approved responses and send them via WhatsApp."""
+    if not WEB_SERVICE_URL:
+        return  # local dev — skip auto-send
+
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{WEB_SERVICE_URL}/api/approved-responses", timeout=10) as resp:
+            pending = json.loads(resp.read())
+    except Exception as e:
+        log(f"[send] Could not fetch approved responses: {e}")
+        return
+
+    if not pending:
+        return
+
+    log(f"[send] {len(pending)} approved response(s) to send")
+    for item in pending:
+        response_id = item["response_id"]
+        chat_name = item["chat_name"] or item["sender"]
+        text = item["text"]
+
+        success = send_whatsapp_message(page, chat_name, text)
+
+        if success:
+            # Mark as sent
+            try:
+                req = urllib.request.Request(
+                    f"{WEB_SERVICE_URL}/api/sent/{response_id}",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                urllib.request.urlopen(req, timeout=10)
+            except Exception as e:
+                log(f"[send] Could not mark response {response_id} as sent: {e}")
+        else:
+            log(f"[send] Failed to send response {response_id} to '{chat_name}'")
+
+
 def scan_once(page) -> list[dict]:
     """Scan recent chats for new messages using sidebar state diffing + DB dedup."""
     global _known_groups, _group_detect_counter
@@ -674,6 +753,7 @@ def run_scanner(once: bool = False):
                     if new_messages and not WEB_SERVICE_URL:
                         from responder import process_new_messages
                         process_new_messages(new_messages)
+                    send_approved_responses(page)
                 except KeyboardInterrupt:
                     log("Stopped.")
                     break

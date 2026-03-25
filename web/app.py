@@ -72,6 +72,23 @@ def api_pending():
     return jsonify(get_pending_messages())
 
 
+@app.route("/api/approved-responses", methods=["GET"])
+def api_approved_responses():
+    """Get approved responses not yet sent — polled by the scanner to auto-send."""
+    conn = get_db()
+    rows = conn.execute("""
+        SELECT r.id as response_id,
+               COALESCE(r.final_text, r.suggested_text) as text,
+               m.chat_name, m.sender
+        FROM responses r
+        JOIN messages m ON m.id = r.message_id
+        WHERE r.status = 'approved' AND r.sent_at IS NULL
+        ORDER BY r.created_at ASC
+    """).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+
 @app.route("/api/approve/<int:response_id>", methods=["POST"])
 def api_approve(response_id):
     """Approve a suggested response (optionally with edits)."""
