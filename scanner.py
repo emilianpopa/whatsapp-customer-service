@@ -48,6 +48,7 @@ def log(msg: str):
 # Serves screenshots of the WhatsApp QR code so you can scan remotely via browser.
 
 _qr_screenshot: bytes = b""
+_live_screenshot: bytes = b""
 _qr_lock = threading.Lock()
 
 _QR_HTML = """<!DOCTYPE html><html><head><title>WhatsApp QR Login</title>
@@ -75,6 +76,18 @@ class _QRHandler(BaseHTTPRequestHandler):
         pass  # suppress access logs
 
     def do_GET(self):
+        if self.path == "/screenshot":
+            with _qr_lock:
+                data = _live_screenshot
+            if data:
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.end_headers()
+                self.wfile.write(data)
+            else:
+                self.send_response(503)
+                self.end_headers()
+            return
         if self.path == "/qr":
             with _qr_lock:
                 data = _qr_screenshot
@@ -270,7 +283,18 @@ def get_sidebar_chats(page) -> list[dict]:
 
 def detect_all_groups(page) -> set:
     """Use WhatsApp Web's Groups filter tab to get a definitive list of all group chat names."""
+    global _live_screenshot
     try:
+        # Scroll sidebar to top so filter tabs are visible
+        page.evaluate("const el = document.querySelector('#pane-side'); if (el) el.scrollTop = 0;")
+        page.wait_for_timeout(500)
+        # Save a screenshot for debugging
+        try:
+            shot = page.screenshot()
+            with _qr_lock:
+                _live_screenshot = shot
+        except Exception:
+            pass
         # Click the "Groups" filter pill in the sidebar.
         # WhatsApp Web renders these as various element types — search broadly.
         clicked = page.evaluate("""
