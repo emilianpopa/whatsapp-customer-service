@@ -120,12 +120,13 @@ def api_dismiss(message_id):
 def api_dismiss_groups():
     """Delete all messages that look like they came from group chats."""
     conn = get_db()
-    # Match chat names that are typing indicators or group activity text
     rows = conn.execute("""
         SELECT id FROM messages
         WHERE chat_name LIKE '~ %'
            OR chat_name LIKE '% typing...'
            OR chat_name LIKE '% is typing...'
+           OR chat_name LIKE '#%'
+           OR (chat_name IS NOT NULL AND chat_name != '' AND chat_name != sender)
     """).fetchall()
     ids = [r["id"] for r in rows]
     if ids:
