@@ -287,50 +287,24 @@ def detect_all_groups(page) -> set:
     """Use WhatsApp Web's Groups filter tab to get a definitive list of all group chat names."""
     global _live_screenshot
     try:
-        # Scroll sidebar to top so filter tabs are visible
-        page.evaluate("const el = document.querySelector('#pane-side'); if (el) el.scrollTop = 0;")
-        page.wait_for_timeout(500)
         # Save a screenshot for debugging
         try:
-            shot = page.screenshot()
             with _qr_lock:
-                _live_screenshot = shot
+                _live_screenshot = page.screenshot()
         except Exception:
             pass
-        # Click the "Groups" filter pill in the sidebar.
-        # WhatsApp Web renders these as various element types — search broadly.
-        clicked = page.evaluate("""
-            () => {
-                // Walk all text nodes looking for one whose direct text is "Groups"
-                const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-                let node;
-                while ((node = walker.nextNode())) {
-                    if (node.textContent.trim().startsWith('Groups')) {
-                        // Find the nearest clickable ancestor
-                        let el = node.parentElement;
-                        for (let i = 0; i < 5; i++) {
-                            if (!el) break;
-                            const tag = el.tagName;
-                            const role = el.getAttribute('role') || '';
-                            if (tag === 'BUTTON' || role === 'button' || role === 'tab' ||
-                                role === 'listitem' || el.hasAttribute('tabindex')) {
-                                el.click();
-                                return true;
-                            }
-                            el = el.parentElement;
-                        }
-                        // Fallback: click the text node's parent directly
-                        node.parentElement.click();
-                        return true;
-                    }
-                }
-                return false;
-            }
-        """)
-        if not clicked:
+
+        # Use Playwright locator — handles React rendering better than raw JS TreeWalker
+        import re as _re
+        groups_btn = page.locator('[role="button"], button').filter(
+            has_text=_re.compile(r'Groups', _re.IGNORECASE)
+        )
+        count = groups_btn.count()
+        if count == 0:
             log("[groups] Could not find Groups filter tab — skipping auto-detection")
             return set()
 
+        groups_btn.first.click(timeout=3000)
         page.wait_for_timeout(1500)
 
         # Collect all chat names now visible (they are all groups)
@@ -348,14 +322,11 @@ def detect_all_groups(page) -> set:
         """)
 
         # Click "All" to restore the full list
-        page.evaluate("""
-            () => {
-                const pane = document.querySelector('#pane-side') || document.body;
-                const all = Array.from(pane.querySelectorAll('button, [role="button"], [role="tab"]'));
-                const btn = all.find(el => el.textContent.trim().startsWith('All'));
-                if (btn) btn.click();
-            }
-        """)
+        all_btn = page.locator('[role="button"], button').filter(
+            has_text=_re.compile(r'^All', _re.IGNORECASE)
+        )
+        if all_btn.count() > 0:
+            all_btn.first.click(timeout=3000)
         page.wait_for_timeout(800)
 
         group_set = set(names)
