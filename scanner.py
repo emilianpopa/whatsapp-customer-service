@@ -192,15 +192,40 @@ _chat_last_seen: dict = {}  # {chat_name: (preview, time)}
 
 def get_sidebar_chats(page) -> list[dict]:
     """Get all visible chats from the sidebar (name, last message preview, timestamp)."""
+    # First log selector counts to help debug on Railway
+    counts = page.evaluate(r"""
+        () => ({
+            paneListitem: document.querySelectorAll('#pane-side [role="listitem"]').length,
+            allListitem: document.querySelectorAll('[role="listitem"]').length,
+            cellFrame: document.querySelectorAll('[data-testid="cell-frame-container"]').length,
+            paneSide: document.querySelectorAll('#pane-side').length,
+            sideEl: document.querySelectorAll('#side').length,
+            bodyText: document.body ? document.body.innerText.slice(0, 100) : 'no body',
+        })
+    """)
+    log(f"  DOM counts: {counts}")
+
     return page.evaluate(r"""
         () => {
             const results = [];
-            const chatItems = document.querySelectorAll(
-                '#pane-side [role="listitem"], #pane-side [data-testid="cell-frame-container"]'
-            );
+            // Try multiple selector strategies
+            const selectors = [
+                '#pane-side [role="listitem"]',
+                '[data-testid="cell-frame-container"]',
+                'div[role="listitem"]',
+                '#pane-side li',
+            ];
+            let chatItems = null;
+            for (const sel of selectors) {
+                const found = document.querySelectorAll(sel);
+                if (found.length > 0) { chatItems = found; break; }
+            }
+            if (!chatItems || chatItems.length === 0) return results;
+
             chatItems.forEach(item => {
                 const titleEl = item.querySelector(
-                    '[data-testid="cell-frame-title"] span, span[title][dir="auto"]'
+                    '[data-testid="cell-frame-title"] span, span[title][dir="auto"], ' +
+                    'span[title], [data-testid="cell-frame-title"]'
                 );
                 const chatName = titleEl
                     ? (titleEl.getAttribute('title') || titleEl.textContent).trim()
@@ -209,13 +234,11 @@ def get_sidebar_chats(page) -> list[dict]:
 
                 const previewEl = item.querySelector(
                     'span[data-testid="last-msg-status"], span[data-testid="msg-text"],' +
-                    ' .copyable-text, [data-testid="cell-frame-secondary-text"] span'
+                    ' [data-testid="cell-frame-secondary-text"] span, .copyable-text'
                 );
                 const preview = previewEl ? previewEl.textContent.trim() : '';
 
-                const timeEl = item.querySelector(
-                    '[data-testid="cell-frame-secondary"] span'
-                );
+                const timeEl = item.querySelector('[data-testid="cell-frame-secondary"] span');
                 const time = timeEl ? timeEl.textContent.trim() : '';
 
                 results.push({ chatName, preview, time });
