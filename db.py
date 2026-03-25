@@ -61,15 +61,35 @@ def init_db():
     conn.close()
 
 
+def _parse_whatsapp_timestamp(ts: str) -> str | None:
+    """Parse WhatsApp timestamp like '1:01 AM, 3/25/2026' into ISO datetime for sorting."""
+    if not ts:
+        return None
+    try:
+        from datetime import datetime as dt
+        return dt.strptime(ts.strip(), "%I:%M %p, %m/%d/%Y").strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
 def store_message(sender: str, content: str, timestamp: str = None,
                   is_outgoing: bool = False, chat_name: str = None) -> int:
     """Store an incoming message. Returns the message ID."""
+    # Use parsed WhatsApp timestamp as received_at so ordering reflects actual message time
+    parsed_ts = _parse_whatsapp_timestamp(timestamp)
     conn = get_db()
-    cur = conn.execute(
-        "INSERT INTO messages (sender, content, timestamp, is_outgoing, chat_name) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (sender, content, timestamp, int(is_outgoing), chat_name),
-    )
+    if parsed_ts:
+        cur = conn.execute(
+            "INSERT INTO messages (sender, content, timestamp, received_at, is_outgoing, chat_name) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sender, content, timestamp, parsed_ts, int(is_outgoing), chat_name),
+        )
+    else:
+        cur = conn.execute(
+            "INSERT INTO messages (sender, content, timestamp, is_outgoing, chat_name) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (sender, content, timestamp, int(is_outgoing), chat_name),
+        )
     msg_id = cur.lastrowid
     conn.commit()
     conn.close()
@@ -96,13 +116,15 @@ def store_response(message_id: int, suggested_text: str,
 
 
 def get_pending_messages() -> list[dict]:
-    """Get messages awaiting review (with their suggested responses)."""
+    """Get messages awaiting review (with their latest suggested response)."""
     conn = get_db()
     rows = conn.execute("""
         SELECT m.id, m.sender, m.content, m.timestamp, m.received_at, m.chat_name, m.status,
                r.id as response_id, r.suggested_text, r.confidence, r.auto_reply, r.status as resp_status
         FROM messages m
-        LEFT JOIN responses r ON r.message_id = m.id
+        LEFT JOIN responses r ON r.id = (
+            SELECT id FROM responses WHERE message_id = m.id ORDER BY created_at DESC LIMIT 1
+        )
         WHERE m.status IN ('new', 'pending_review')
         ORDER BY m.received_at DESC
     """).fetchall()
