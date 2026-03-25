@@ -207,6 +207,12 @@ EXCLUDED_CHATS = {
     for name in os.environ.get("EXCLUDED_CHATS", "").split(",")
     if name.strip()
 }
+# Chats to never skip regardless of group detection (e.g. contacts who also have a group with their name)
+WHITELIST_CHATS = {
+    name.strip()
+    for name in os.environ.get("WHITELIST_CHATS", "").split(",")
+    if name.strip()
+}
 
 # In-memory state: tracks last-seen preview+time per chat to detect new activity
 _chat_last_seen: dict = {}  # {chat_name: (preview, time)}
@@ -536,12 +542,17 @@ def scan_once(page) -> list[dict]:
         log("No chats found in sidebar.")
         return []
 
-    # Skip groups and explicitly excluded chats
+    # Skip groups and explicitly excluded chats (but never skip whitelisted contacts)
     if SKIP_GROUPS and _known_groups:
-        skipped = [c["chatName"] for c in sidebar if c["chatName"] in _known_groups]
+        effective_groups = _known_groups - WHITELIST_CHATS
+        skipped = [c["chatName"] for c in sidebar if c["chatName"] in effective_groups]
         if skipped:
             log(f"Skipping {len(skipped)} group/excluded chat(s): {skipped}")
-        sidebar = [c for c in sidebar if c["chatName"] not in _known_groups]
+        if WHITELIST_CHATS:
+            kept = [c["chatName"] for c in sidebar if c["chatName"] in WHITELIST_CHATS and c["chatName"] in _known_groups]
+            if kept:
+                log(f"Keeping whitelisted chat(s) despite group detection: {kept}")
+        sidebar = [c for c in sidebar if c["chatName"] not in effective_groups]
 
     # On very first scan, open ALL DM chats for a backfill instead of just initialising state
     if not _chat_last_seen:
