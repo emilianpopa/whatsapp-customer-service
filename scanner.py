@@ -55,9 +55,19 @@ _QR_HTML = """<!DOCTYPE html><html><head><title>WhatsApp QR Login</title>
 <body style="background:#111;display:flex;flex-direction:column;align-items:center;
 justify-content:center;height:100vh;margin:0;font-family:sans-serif;color:#fff;">
 <h2>Scan with WhatsApp</h2>
-<img src="/qr" style="max-width:350px;border-radius:8px;" onerror="this.alt='Waiting for QR...'">
-<p style="color:#aaa;font-size:13px;">Page auto-refreshes every 4 seconds</p>
+<img src="/qr" style="max-width:350px;border-radius:8px;" onerror="this.style.display='none'">
+<p id="status" style="color:#aaa;font-size:13px;">Page auto-refreshes every 4 seconds</p>
 </body></html>"""
+
+_LOADING_HTML = """<!DOCTYPE html><html><head><title>WhatsApp Scanner</title>
+<meta http-equiv="refresh" content="5"></head>
+<body style="background:#111;display:flex;flex-direction:column;align-items:center;
+justify-content:center;height:100vh;margin:0;font-family:sans-serif;color:#fff;">
+<h2>Scanner starting...</h2>
+<p style="color:#aaa;font-size:13px;">Loading WhatsApp Web. Page auto-refreshes every 5 seconds.</p>
+</body></html>"""
+
+_qr_needed = False  # set to True once QR login is required
 
 
 class _QRHandler(BaseHTTPRequestHandler):
@@ -80,15 +90,21 @@ class _QRHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
-            self.wfile.write(_QR_HTML.encode())
+            html = _QR_HTML if _qr_needed else _LOADING_HTML
+            self.wfile.write(html.encode())
 
+
+_qr_server_started = False
 
 def _start_qr_server():
+    global _qr_server_started
+    if _qr_server_started:
+        return
     server = HTTPServer(("0.0.0.0", QR_PORT), _QRHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
-    log(f"QR server running on port {QR_PORT} — open in browser to scan")
-    return server
+    _qr_server_started = True
+    log(f"HTTP server running on port {QR_PORT}")
 
 
 # ── Browser helpers ───────────────────────────────────────────────────────────
@@ -142,12 +158,12 @@ def wait_for_login(page):
         log("[OK] Already logged in.")
         return
 
+    global _qr_needed
+    _qr_needed = True
     log("=> QR scan required. Open the QR server URL in your browser to scan.")
-    _start_qr_server()
 
-    # Poll for login while pushing QR screenshots to the HTTP server
-    end = time.monotonic() + 300
-    while time.monotonic() < end:
+    # Poll indefinitely — keep serving screenshots until the user scans
+    while True:
         try:
             screenshot = page.screenshot()
             with _qr_lock:
@@ -160,11 +176,10 @@ def wait_for_login(page):
             try:
                 page.wait_for_selector(sel, timeout=2000)
                 log("[OK] Logged in successfully.")
+                _qr_needed = False
                 return
             except PlaywrightTimeout:
                 pass
-
-    raise PlaywrightTimeout("WhatsApp login timed out after 5 minutes.")
 
 
 # ── Message scanning ──────────────────────────────────────────────────────────
@@ -463,6 +478,7 @@ def run_scanner(once: bool = False):
     """Main scanner loop — opens WhatsApp Web and polls for new messages."""
     if not WEB_SERVICE_URL:
         init_db()
+    _start_qr_server()  # start HTTP server immediately so URL always responds
     _remove_browser_locks()
 
     with sync_playwright() as p:
