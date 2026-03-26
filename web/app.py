@@ -255,6 +255,49 @@ def knowledge_index():
     return render_template("knowledge.html", static_docs=static_docs, db_docs=db_docs)
 
 
+@app.route("/api/kb/upload", methods=["POST"])
+def api_kb_upload():
+    """Upload a document file (PDF, TXT, MD) to the knowledge base."""
+    if "file" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+    f = request.files["file"]
+    if not f.filename:
+        return jsonify({"error": "No filename"}), 400
+
+    filename = f.filename
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    title = request.form.get("title", "").strip() or filename.rsplit(".", 1)[0].replace("_", " ").replace("-", " ").title()
+    source = request.form.get("source", "").strip()
+
+    raw = f.read()
+
+    if ext == "pdf":
+        try:
+            import pdfplumber, io
+            with pdfplumber.open(io.BytesIO(raw)) as pdf:
+                pages = [page.extract_text() or "" for page in pdf.pages]
+            content = "\n\n".join(p for p in pages if p.strip())
+        except Exception as e:
+            return jsonify({"error": f"PDF extraction failed: {e}"}), 500
+    elif ext in ("txt", "md"):
+        content = raw.decode("utf-8", errors="replace")
+    else:
+        return jsonify({"error": f"Unsupported file type: .{ext}. Use PDF, TXT, or MD."}), 400
+
+    if not content.strip():
+        return jsonify({"error": "No text could be extracted from the file"}), 400
+
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO knowledge_docs (title, content, source, file_name, file_type) VALUES (?, ?, ?, ?, ?)",
+        (title, content, source or None, filename, ext),
+    )
+    doc_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "id": doc_id, "title": title, "chars": len(content)})
+
+
 @app.route("/api/kb/docs", methods=["POST"])
 def api_kb_create():
     """Create a new knowledge base document."""

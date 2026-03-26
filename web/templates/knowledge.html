@@ -11,7 +11,7 @@
 
 {% block content %}
 <style>
-    .kb-grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; min-height: 70vh; }
+    .kb-grid { display: grid; grid-template-columns: 280px 1fr; gap: 20px; min-height: 70vh; }
     .kb-sidebar { background: white; border-radius: 8px; padding: 16px;
                   box-shadow: 0 1px 3px rgba(0,0,0,0.08); align-self: start; }
     .kb-sidebar h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
@@ -22,7 +22,7 @@
     .doc-item:hover { background: #f0f2f5; }
     .doc-item.active { background: #e7f8f4; color: #00a884; font-weight: 500; }
     .doc-item .doc-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px;
-                           background: #f0f2f5; color: #667781; margin-left: auto; flex-shrink: 0; }
+                           background: #f0f2f5; color: #667781; margin-left: auto; flex-shrink: 0; white-space:nowrap; }
     .doc-item.active .doc-badge { background: #d9fdd3; color: #1b5e20; }
 
     .kb-main { background: white; border-radius: 8px; padding: 24px;
@@ -35,7 +35,6 @@
                   max-height: 500px; overflow-y: auto; }
     .kb-actions { display: flex; gap: 8px; margin-top: 16px; }
 
-    .edit-form { display: none; }
     .edit-form input, .edit-form textarea {
         width: 100%; padding: 10px 12px; border: 1px solid #e9edef;
         border-radius: 8px; font-size: 14px; font-family: inherit;
@@ -44,12 +43,28 @@
     .edit-form textarea { min-height: 300px; resize: vertical; font-family: monospace; }
     .edit-form label { font-size: 12px; color: #667781; display: block; margin-bottom: 4px; }
 
-    .new-doc-btn { width: 100%; margin-top: 12px; padding: 8px; background: #00a884;
-                   color: white; border: none; border-radius: 6px; font-size: 13px;
+    .sidebar-btns { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+    .sidebar-btn { width: 100%; padding: 8px; border: none; border-radius: 6px; font-size: 13px;
                    cursor: pointer; font-weight: 500; }
-    .new-doc-btn:hover { opacity: 0.9; }
+    .sidebar-btn-primary { background: #00a884; color: white; }
+    .sidebar-btn-primary:hover { opacity: 0.9; }
+    .sidebar-btn-secondary { background: #f0f2f5; color: #111b21; border: 1px solid #e9edef; }
+    .sidebar-btn-secondary:hover { background: #e9edef; }
 
-    .welcome { text-align: center; padding: 60px 20px; color: #667781; }
+    /* Drag-and-drop upload zone */
+    .upload-zone { border: 2px dashed #e9edef; border-radius: 8px; padding: 32px 20px;
+                   text-align: center; color: #667781; cursor: pointer; transition: all 0.2s;
+                   margin-bottom: 16px; }
+    .upload-zone:hover, .upload-zone.drag-over { border-color: #00a884; background: #f0faf7; color: #00a884; }
+    .upload-zone .upload-icon { font-size: 36px; margin-bottom: 8px; }
+    .upload-zone p { font-size: 14px; margin-bottom: 4px; }
+    .upload-zone span { font-size: 12px; color: #aaa; }
+    #fileInput { display: none; }
+    .upload-progress { display: none; background: #f0faf7; border: 1px solid #d9fdd3;
+                       border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
+                       font-size: 14px; color: #1b5e20; }
+
+    .welcome { text-align: center; padding: 40px 20px; color: #667781; }
     .welcome h3 { font-size: 20px; font-weight: 600; color: #111b21; margin-bottom: 8px; }
 
     @media (max-width: 768px) {
@@ -65,7 +80,7 @@
         {% for doc in static_docs %}
         <div class="doc-item" id="static-{{ loop.index0 }}"
              onclick="showStatic({{ loop.index0 }}, {{ doc|tojson }})">
-            {{ doc.title }}
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ doc.title }}</span>
             <span class="doc-badge">built-in</span>
         </div>
         {% endfor %}
@@ -76,27 +91,70 @@
         {% for doc in db_docs %}
         <div class="doc-item" id="db-{{ doc.id }}"
              onclick="showDb({{ doc.id }}, {{ doc|tojson }})">
-            {{ doc.title }}
-            <span class="doc-badge">custom</span>
+            <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ doc.title }}</span>
+            <span class="doc-badge">{{ doc.file_type or 'text' }}</span>
         </div>
         {% endfor %}
         {% else %}
         <div style="font-size:13px;color:#aaa;padding:8px 0;">No custom documents yet.</div>
         {% endif %}
 
-        <button class="new-doc-btn" onclick="newDoc()">+ Add Document</button>
+        <div class="sidebar-btns">
+            <button class="sidebar-btn sidebar-btn-primary" onclick="showUpload()">Upload File</button>
+            <button class="sidebar-btn sidebar-btn-secondary" onclick="newDoc()">+ Write Document</button>
+        </div>
     </div>
 
     <!-- Main panel -->
     <div class="kb-main" id="mainPanel">
+
+        <!-- Welcome -->
         <div class="welcome" id="welcomeState">
             <h3>Knowledge Base</h3>
-            <p>Select a document from the sidebar to view or edit it.<br>
-               Click <strong>+ Add Document</strong> to create a new one.</p>
-            <p style="margin-top:16px;font-size:13px;">
-                All documents here are automatically included in the AI's context
-                when generating responses to WhatsApp messages.
+            <p>Upload files or write documents that the AI will use<br>
+               when answering WhatsApp messages from clients.</p>
+            <p style="margin-top:12px;font-size:13px;color:#aaa;">
+                Supports PDF, TXT, and Markdown. All documents are automatically<br>
+                included in the AI's context when generating responses.
             </p>
+            <div style="display:flex;gap:12px;justify-content:center;margin-top:20px;">
+                <button class="btn btn-approve" onclick="showUpload()">Upload File</button>
+                <button class="btn btn-edit" onclick="newDoc()">Write Document</button>
+            </div>
+        </div>
+
+        <!-- Upload state -->
+        <div id="uploadState" style="display:none;">
+            <h2>Upload Document</h2>
+            <p class="doc-meta">Supported formats: PDF, TXT, Markdown (.md)</p>
+
+            <div class="upload-zone" id="uploadZone"
+                 onclick="document.getElementById('fileInput').click()"
+                 ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+                <div class="upload-icon">📄</div>
+                <p>Click to choose a file, or drag and drop here</p>
+                <span>PDF, TXT, MD — up to 10 MB</span>
+            </div>
+            <input type="file" id="fileInput" accept=".pdf,.txt,.md" onchange="onFileSelected(event)">
+
+            <div class="upload-progress" id="uploadProgress">Uploading...</div>
+
+            <div id="uploadForm" style="display:none;">
+                <div class="edit-form">
+                    <label>Document Title</label>
+                    <input type="text" id="uploadTitle" placeholder="e.g. Cancellation Policy">
+                    <label>Source / Notes (optional)</label>
+                    <input type="text" id="uploadSource" placeholder="e.g. Operations manual, March 2026">
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-approve" onclick="submitUpload()">Save to Knowledge Base</button>
+                        <button class="btn btn-edit" onclick="cancelUpload()">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:12px;" id="uploadCancelBtn">
+                <button class="btn btn-edit" onclick="cancelUpload()">Cancel</button>
+            </div>
         </div>
 
         <!-- View state -->
@@ -107,10 +165,10 @@
             <div class="kb-actions" id="viewActions"></div>
         </div>
 
-        <!-- Edit / New state -->
+        <!-- Edit / Write state -->
         <div id="editState" style="display:none;">
-            <h2 id="editHeading">Edit Document</h2>
-            <div class="edit-form" id="editForm" style="display:block;margin-top:16px;">
+            <h2 id="editHeading">New Document</h2>
+            <div class="edit-form" style="margin-top:16px;">
                 <label>Title</label>
                 <input type="text" id="editTitle" placeholder="e.g. Opening Hours">
                 <label>Source / Notes (optional)</label>
@@ -129,22 +187,23 @@
 
 <script>
 let _currentDocId = null;
-let _currentIsStatic = false;
+let _pendingFile = null;
 
 function clearActive() {
     document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
+}
+function hideAll() {
+    ['welcomeState','uploadState','viewState','editState'].forEach(id => {
+        document.getElementById(id).style.display = 'none';
+    });
 }
 
 function showStatic(idx, doc) {
     clearActive();
     document.getElementById('static-' + idx).classList.add('active');
     _currentDocId = null;
-    _currentIsStatic = true;
-
-    document.getElementById('welcomeState').style.display = 'none';
-    document.getElementById('editState').style.display = 'none';
+    hideAll();
     document.getElementById('viewState').style.display = 'block';
-
     document.getElementById('viewTitle').textContent = doc.title;
     document.getElementById('viewMeta').textContent = 'Built-in document — ' + doc.filename + ' (read-only)';
     document.getElementById('viewContent').textContent = doc.content;
@@ -156,28 +215,106 @@ function showDb(id, doc) {
     clearActive();
     document.getElementById('db-' + id).classList.add('active');
     _currentDocId = id;
-    _currentIsStatic = false;
-
-    document.getElementById('welcomeState').style.display = 'none';
-    document.getElementById('editState').style.display = 'none';
+    hideAll();
     document.getElementById('viewState').style.display = 'block';
-
     document.getElementById('viewTitle').textContent = doc.title;
-    const meta = doc.source ? ('Source: ' + doc.source + ' · ') : '';
-    document.getElementById('viewMeta').textContent = meta + 'Updated: ' + (doc.updated_at || '—');
+    let meta = '';
+    if (doc.file_name) meta += '📎 ' + doc.file_name + ' · ';
+    if (doc.source) meta += 'Source: ' + doc.source + ' · ';
+    meta += 'Updated: ' + (doc.updated_at || '—');
+    document.getElementById('viewMeta').textContent = meta;
     document.getElementById('viewContent').textContent = doc.content;
     document.getElementById('viewActions').innerHTML =
-        '<button class="btn btn-edit" onclick="editDoc(' + id + ', ' + JSON.stringify(doc).replace(/</g,'\\u003c') + ')">Edit</button>' +
+        '<button class="btn btn-edit" onclick=\'editDoc(' + id + ',' + JSON.stringify(doc).replace(/</g,'\\u003c') + ')\'>Edit</button>' +
         '<button class="btn btn-reject" onclick="deleteDoc(' + id + ')">Delete</button>';
+}
+
+function showUpload() {
+    clearActive();
+    _pendingFile = null;
+    hideAll();
+    document.getElementById('uploadState').style.display = 'block';
+    document.getElementById('uploadForm').style.display = 'none';
+    document.getElementById('uploadProgress').style.display = 'none';
+    document.getElementById('uploadCancelBtn').style.display = 'block';
+    document.getElementById('fileInput').value = '';
+}
+
+function cancelUpload() {
+    hideAll();
+    document.getElementById('welcomeState').style.display = 'block';
+    clearActive();
+}
+
+function onDragOver(e) {
+    e.preventDefault();
+    document.getElementById('uploadZone').classList.add('drag-over');
+}
+function onDragLeave(e) {
+    document.getElementById('uploadZone').classList.remove('drag-over');
+}
+function onDrop(e) {
+    e.preventDefault();
+    document.getElementById('uploadZone').classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) prepareFile(file);
+}
+function onFileSelected(e) {
+    const file = e.target.files[0];
+    if (file) prepareFile(file);
+}
+
+function prepareFile(file) {
+    _pendingFile = file;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['pdf','txt','md'].includes(ext)) {
+        alert('Unsupported file type. Please use PDF, TXT, or MD.');
+        return;
+    }
+    const autoTitle = file.name.replace(/\.[^.]+$/, '').replace(/[_-]/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    document.getElementById('uploadTitle').value = autoTitle;
+    document.getElementById('uploadSource').value = '';
+    document.getElementById('uploadForm').style.display = 'block';
+    document.getElementById('uploadCancelBtn').style.display = 'none';
+    document.getElementById('uploadZone').innerHTML =
+        '<div class="upload-icon">✅</div><p>' + file.name + '</p><span>' +
+        (file.size / 1024).toFixed(0) + ' KB — ' + ext.toUpperCase() + '</span>';
+}
+
+async function submitUpload() {
+    if (!_pendingFile) return;
+    const title = document.getElementById('uploadTitle').value.trim();
+    if (!title) { alert('Please enter a title.'); return; }
+    const source = document.getElementById('uploadSource').value.trim();
+
+    const formData = new FormData();
+    formData.append('file', _pendingFile);
+    formData.append('title', title);
+    if (source) formData.append('source', source);
+
+    document.getElementById('uploadForm').style.display = 'none';
+    document.getElementById('uploadProgress').style.display = 'block';
+    document.getElementById('uploadProgress').textContent = 'Uploading and extracting text...';
+
+    const res = await fetch('/api/kb/upload', { method: 'POST', body: formData });
+    if (res.ok) {
+        const data = await res.json();
+        document.getElementById('uploadProgress').textContent =
+            '✅ Saved "' + data.title + '" (' + data.chars.toLocaleString() + ' characters extracted)';
+        setTimeout(() => location.reload(), 1200);
+    } else {
+        const err = await res.text();
+        document.getElementById('uploadProgress').style.display = 'none';
+        document.getElementById('uploadForm').style.display = 'block';
+        alert('Upload failed: ' + err);
+    }
 }
 
 function newDoc() {
     clearActive();
     _currentDocId = null;
-    _currentIsStatic = false;
-
-    document.getElementById('welcomeState').style.display = 'none';
-    document.getElementById('viewState').style.display = 'none';
+    hideAll();
     document.getElementById('editState').style.display = 'block';
     document.getElementById('editHeading').textContent = 'New Document';
     document.getElementById('editTitle').value = '';
@@ -189,8 +326,7 @@ function newDoc() {
 
 function editDoc(id, doc) {
     _currentDocId = id;
-    document.getElementById('welcomeState').style.display = 'none';
-    document.getElementById('viewState').style.display = 'none';
+    hideAll();
     document.getElementById('editState').style.display = 'block';
     document.getElementById('editHeading').textContent = 'Edit Document';
     document.getElementById('editTitle').value = doc.title || '';
@@ -201,7 +337,7 @@ function editDoc(id, doc) {
 }
 
 function cancelEdit() {
-    document.getElementById('editState').style.display = 'none';
+    hideAll();
     document.getElementById('welcomeState').style.display = 'block';
     clearActive();
 }
@@ -217,15 +353,11 @@ async function saveDoc() {
     const method = isEdit ? 'PUT' : 'POST';
 
     const res = await fetch(url, {
-        method,
-        headers: {'Content-Type': 'application/json'},
+        method, headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({title, content, source}),
     });
-    if (res.ok) {
-        location.reload();
-    } else {
-        alert('Save failed: ' + await res.text());
-    }
+    if (res.ok) { location.reload(); }
+    else { alert('Save failed: ' + await res.text()); }
 }
 
 async function deleteDoc(id) {
@@ -233,11 +365,8 @@ async function deleteDoc(id) {
     if (!docId) return;
     if (!confirm('Delete this document? This cannot be undone.')) return;
     const res = await fetch('/api/kb/docs/' + docId, {method: 'DELETE'});
-    if (res.ok) {
-        location.reload();
-    } else {
-        alert('Delete failed: ' + await res.text());
-    }
+    if (res.ok) { location.reload(); }
+    else { alert('Delete failed: ' + await res.text()); }
 }
 </script>
 {% endblock %}

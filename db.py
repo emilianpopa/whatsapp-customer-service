@@ -50,6 +50,8 @@ def init_db():
             title TEXT NOT NULL,
             content TEXT NOT NULL,
             source TEXT,
+            file_name TEXT,
+            file_type TEXT,
             updated_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -57,6 +59,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_messages_received ON messages(received_at);
         CREATE INDEX IF NOT EXISTS idx_responses_status ON responses(status);
     """)
+    # Migrate: add file_name/file_type columns if they don't exist yet
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_docs)").fetchall()}
+    for col, typedef in [("file_name", "TEXT"), ("file_type", "TEXT")]:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE knowledge_docs ADD COLUMN {col} {typedef}")
     conn.commit()
     conn.close()
 
