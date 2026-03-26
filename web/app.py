@@ -25,8 +25,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db import (
     init_db, get_pending_messages, get_auto_replied, get_all_messages,
     approve_response, reject_response, mark_sent, store_message, get_db,
+    message_exists_by_wa_id, get_message_for_response,
 )
 from responder import generate_response, process_new_messages
+import whatsapp_api
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key-change-me")
@@ -35,6 +37,62 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key-change-me")
 @app.before_request
 def ensure_db():
     init_db()
+
+
+# ── WhatsApp Cloud API Webhook ────────────────────────────────────────────────
+
+@app.route("/webhook", methods=["GET"])
+def webhook_verify():
+    """Meta calls this once during webhook registration to confirm the URL is valid."""
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == os.environ.get("WEBHOOK_VERIFY_TOKEN", ""):
+        return challenge, 200
+    return "Forbidden", 403
+
+
+@app.route("/webhook", methods=["POST"])
+def webhook_receive():
+    """Receive incoming WhatsApp messages from Meta Cloud API.
+
+    Meta sends a POST for every new message, status update, or read receipt.
+    We only process inbound text messages; everything else is acknowledged and ignored.
+    """
+    data = request.get_json(silent=True) or {}
+    try:
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                if "messages" not in value:
+                    continue  # status update / read receipt — ignore
+                contacts = {c["wa_id"]: c.get("profile", {}).get("name", "") for c in value.get("contacts", [])}
+                for msg in value["messages"]:
+                    if msg.get("type") != "text":
+                        continue  # ignore images, audio, etc. for now
+                    wa_id = msg["id"]              # e.g. wamid.xxx — unique per message
+                    sender = msg["from"]           # E.164 without '+', e.g. 27821234567
+                    content = msg["text"]["body"]
+                    timestamp = msg["timestamp"]   # Unix epoch string
+                    chat_name = contacts.get(sender, sender)
+
+                    if message_exists_by_wa_id(wa_id):
+                        continue  # Meta may deliver the same webhook twice
+
+                    msg_id = store_message(
+                        sender=sender,
+                        content=content,
+                        timestamp=timestamp,
+                        is_outgoing=False,
+                        chat_name=chat_name,
+                        wa_message_id=wa_id,
+                    )
+                    new_msg = [{"id": msg_id, "sender": sender, "content": content, "chat_name": chat_name}]
+                    threading.Thread(target=process_new_messages, args=(new_msg,), daemon=True).start()
+    except Exception:
+        app.logger.exception("Error processing webhook payload")
+    # Always return 200 — Meta will retry if we don't
+    return "ok", 200
 
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
@@ -92,11 +150,31 @@ def api_approved_responses():
 
 @app.route("/api/approve/<int:response_id>", methods=["POST"])
 def api_approve(response_id):
-    """Approve a suggested response (optionally with edits)."""
+    """Approve a suggested response and send it.
+
+    If the WhatsApp Cloud API is configured, the message is sent immediately and
+    marked as sent in the same request. If API credentials are not set (e.g. local
+    dev / Playwright fallback), it falls back to the old 'approved' status so the
+    scanner can pick it up.
+    """
     data = request.get_json(silent=True) or {}
     final_text = data.get("final_text")
     approve_response(response_id, final_text)
-    return jsonify({"ok": True, "response_id": response_id})
+
+    if whatsapp_api.is_configured():
+        row = get_message_for_response(response_id)
+        if row:
+            try:
+                whatsapp_api.send_message(to=row["sender"], text=row["text"])
+                mark_sent(response_id)
+                return jsonify({"ok": True, "response_id": response_id, "sent": True})
+            except Exception as e:
+                app.logger.error("WhatsApp send failed for response %s: %s", response_id, e)
+                return jsonify({"ok": True, "response_id": response_id, "sent": False,
+                                "error": str(e)}), 200
+
+    # Fallback: approved but not yet sent (scanner will send, or receptionist copies manually)
+    return jsonify({"ok": True, "response_id": response_id, "sent": False})
 
 
 @app.route("/api/reject/<int:response_id>", methods=["POST"])

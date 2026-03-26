@@ -28,8 +28,10 @@ def init_db():
             received_at TEXT NOT NULL DEFAULT (datetime('now')),
             is_outgoing INTEGER NOT NULL DEFAULT 0,
             chat_name TEXT,
-            status TEXT NOT NULL DEFAULT 'new'
+            status TEXT NOT NULL DEFAULT 'new',
             -- status: new, auto_replied, pending_review, replied, ignored
+            wa_message_id TEXT UNIQUE
+            -- WhatsApp message ID from Cloud API webhook (wamid.xxx), used for dedup
         );
 
         CREATE TABLE IF NOT EXISTS responses (
@@ -59,11 +61,22 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_messages_received ON messages(received_at);
         CREATE INDEX IF NOT EXISTS idx_responses_status ON responses(status);
     """)
-    # Migrate: add file_name/file_type columns if they don't exist yet
+    # Migrate: add file_name/file_type columns to knowledge_docs if missing
     existing = {row[1] for row in conn.execute("PRAGMA table_info(knowledge_docs)").fetchall()}
     for col, typedef in [("file_name", "TEXT"), ("file_type", "TEXT")]:
         if col not in existing:
             conn.execute(f"ALTER TABLE knowledge_docs ADD COLUMN {col} {typedef}")
+
+    # Migrate: add wa_message_id to messages if missing
+    msg_cols = {row[1] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+    if "wa_message_id" not in msg_cols:
+        conn.execute("ALTER TABLE messages ADD COLUMN wa_message_id TEXT")
+        # Best-effort unique index; existing rows have NULL which is fine
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_wa_id ON messages(wa_message_id) "
+            "WHERE wa_message_id IS NOT NULL"
+        )
+
     conn.commit()
     conn.close()
 
@@ -80,22 +93,26 @@ def _parse_whatsapp_timestamp(ts: str) -> str | None:
 
 
 def store_message(sender: str, content: str, timestamp: str = None,
-                  is_outgoing: bool = False, chat_name: str = None) -> int:
-    """Store an incoming message. Returns the message ID."""
-    # Use parsed WhatsApp timestamp as received_at so ordering reflects actual message time
+                  is_outgoing: bool = False, chat_name: str = None,
+                  wa_message_id: str = None) -> int:
+    """Store an incoming message. Returns the message ID.
+
+    wa_message_id: Cloud API message ID (wamid.xxx) used for deduplication.
+                   Pass None for Playwright-scraped messages.
+    """
     parsed_ts = _parse_whatsapp_timestamp(timestamp)
     conn = get_db()
     if parsed_ts:
         cur = conn.execute(
-            "INSERT INTO messages (sender, content, timestamp, received_at, is_outgoing, chat_name) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (sender, content, timestamp, parsed_ts, int(is_outgoing), chat_name),
+            "INSERT INTO messages (sender, content, timestamp, received_at, is_outgoing, chat_name, wa_message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (sender, content, timestamp, parsed_ts, int(is_outgoing), chat_name, wa_message_id),
         )
     else:
         cur = conn.execute(
-            "INSERT INTO messages (sender, content, timestamp, is_outgoing, chat_name) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (sender, content, timestamp, int(is_outgoing), chat_name),
+            "INSERT INTO messages (sender, content, timestamp, is_outgoing, chat_name, wa_message_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (sender, content, timestamp, int(is_outgoing), chat_name, wa_message_id),
         )
     msg_id = cur.lastrowid
     conn.commit()
@@ -223,6 +240,30 @@ def message_exists(sender: str, content: str, timestamp: str) -> bool:
     ).fetchone()
     conn.close()
     return row is not None
+
+
+def message_exists_by_wa_id(wa_id: str) -> bool:
+    """Check if a message with this Cloud API message ID already exists (dedup)."""
+    conn = get_db()
+    row = conn.execute(
+        "SELECT 1 FROM messages WHERE wa_message_id = ? LIMIT 1", (wa_id,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def get_message_for_response(response_id: int) -> dict | None:
+    """Return the parent message (sender, chat_name) and resolved text for a response."""
+    conn = get_db()
+    row = conn.execute("""
+        SELECT m.id as message_id, m.sender, m.chat_name,
+               COALESCE(r.final_text, r.suggested_text) as text
+        FROM responses r
+        JOIN messages m ON m.id = r.message_id
+        WHERE r.id = ?
+    """, (response_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def load_knowledge_base() -> str:
