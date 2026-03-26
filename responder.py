@@ -26,11 +26,31 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # Set to 2.0 (impossible) to disable auto-reply — all messages go to human review
 AUTO_REPLY_THRESHOLD = float(os.environ.get("AUTO_REPLY_THRESHOLD", "2.0"))
 
+_client = None
+_system_prompt_cached: list | None = None  # built once, reused with prompt caching
+
 
 def get_client():
-    """Lazy-load the Anthropic client."""
-    import anthropic
-    return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    """Lazy-load the Anthropic client (singleton)."""
+    global _client
+    if _client is None:
+        import anthropic
+        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    return _client
+
+
+def get_system_prompt() -> list:
+    """Build the system prompt once and cache it in memory.
+
+    Uses Anthropic prompt caching so the large static portion (KB + rules)
+    is only billed at full price on the first call; subsequent calls pay ~10%.
+    """
+    global _system_prompt_cached
+    if _system_prompt_cached is None:
+        knowledge_base = load_knowledge_base()
+        text = SYSTEM_PROMPT_TEMPLATE.format(knowledge_base=knowledge_base)
+        _system_prompt_cached = [{"type": "text", "text": text, "cache_control": {"type": "ephemeral"}}]
+    return _system_prompt_cached
 
 
 SYSTEM_PROMPT_TEMPLATE = """You are a helpful, professional receptionist AI for ExpandHealth, \
@@ -84,9 +104,6 @@ def generate_response(sender: str, content: str, chat_name: str = None,
             "reasoning": "No API key configured",
         }
 
-    knowledge_base = load_knowledge_base()
-    system_prompt = SYSTEM_PROMPT_TEMPLATE.format(knowledge_base=knowledge_base)
-
     # Build context from recent messages if available
     context_str = ""
     if recent_context:
@@ -107,7 +124,7 @@ def generate_response(sender: str, content: str, chat_name: str = None,
     response = client.messages.create(
         model="claude-sonnet-4-6",
         max_tokens=1024,
-        system=system_prompt,
+        system=get_system_prompt(),
         messages=[{"role": "user", "content": user_message}],
     )
 
