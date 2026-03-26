@@ -25,7 +25,7 @@ from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeo
 SESSION_DIR = os.environ.get(
     "WHATSAPP_SESSION_DIR", str(Path.home() / ".whatsapp_session_cs")
 )
-SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "30"))  # seconds
+SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "3600"))  # seconds (default: 1 hour)
 QR_PORT = int(os.environ.get("PORT", os.environ.get("QR_PORT", 8080)))
 # When running as a separate Railway service, post messages to the web service API.
 # Set to empty string or omit to write directly to SQLite (local dev mode).
@@ -391,6 +391,33 @@ def detect_all_groups(page) -> set:
         return set()
 
 
+def _is_group_chat(page) -> bool:
+    """Check if the currently open chat is a group by inspecting the header."""
+    return page.evaluate("""
+        () => {
+            const header = document.querySelector('#main header');
+            if (!header) return false;
+            const text = header.textContent || '';
+            // Group chats show "X participants" or "X members" in the header subtitle
+            if (/\\d+\\s+participants?/i.test(text)) return true;
+            if (/\\d+\\s+members?/i.test(text)) return true;
+            // Also check for comma-separated names (small groups show member names)
+            const subtitleEl = header.querySelector(
+                '[data-testid="conversation-info-header-subtitle-text"], ' +
+                'span[class*="subtitle"], span[class*="_21S-L"]'
+            );
+            if (subtitleEl) {
+                const s = subtitleEl.textContent || '';
+                if (/\\d+\\s+participants?/i.test(s)) return true;
+                if (/\\d+\\s+members?/i.test(s)) return true;
+                // Small groups list names like "Alice, Bob, Charlie"
+                if ((s.match(/,/g) || []).length >= 2) return true;
+            }
+            return false;
+        }
+    """)
+
+
 def open_chat_and_extract(page, chat_name: str, scroll_up_times: int = 0) -> list[dict]:
     """Open a specific chat by clicking its title span in the sidebar, then extract messages."""
     # Click directly on the span[title] in the sidebar — no search needed
@@ -410,6 +437,17 @@ def open_chat_and_extract(page, chat_name: str, scroll_up_times: int = 0) -> lis
             return []
 
     page.wait_for_timeout(2000)
+
+    # Confirm this is not a group chat — definitive header check
+    if _is_group_chat(page):
+        log(f"[skip] '{chat_name}' detected as group via header — skipping and adding to blocklist")
+        _known_groups.add(chat_name)
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(300)
+        except Exception:
+            pass
+        return []
 
     # Scroll up to load older messages (for backfill)
     for _ in range(scroll_up_times):
