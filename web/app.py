@@ -225,6 +225,85 @@ def api_test_message():
     return jsonify({"ok": True, "message_id": msg_id})
 
 
+# ── Knowledge Base ────────────────────────────────────────────────────────────
+
+@app.route("/knowledge")
+def knowledge_index():
+    """Knowledge base management page."""
+    from pathlib import Path
+    import re
+
+    # Load static files from knowledge_base/ directory
+    kb_dir = Path(__file__).parent.parent / "knowledge_base"
+    static_docs = []
+    if kb_dir.exists():
+        for md_file in sorted(kb_dir.glob("*.md")):
+            static_docs.append({
+                "filename": md_file.name,
+                "title": md_file.stem.replace("_", " ").title(),
+                "content": md_file.read_text(encoding="utf-8"),
+            })
+
+    # Load DB docs
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT id, title, content, source, updated_at FROM knowledge_docs ORDER BY title"
+    ).fetchall()
+    conn.close()
+    db_docs = [dict(r) for r in rows]
+
+    return render_template("knowledge.html", static_docs=static_docs, db_docs=db_docs)
+
+
+@app.route("/api/kb/docs", methods=["POST"])
+def api_kb_create():
+    """Create a new knowledge base document."""
+    data = request.get_json()
+    title = (data.get("title") or "").strip()
+    content = (data.get("content") or "").strip()
+    source = (data.get("source") or "").strip()
+    if not title or not content:
+        return jsonify({"error": "title and content are required"}), 400
+    conn = get_db()
+    cur = conn.execute(
+        "INSERT INTO knowledge_docs (title, content, source) VALUES (?, ?, ?)",
+        (title, content, source or None),
+    )
+    doc_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True, "id": doc_id})
+
+
+@app.route("/api/kb/docs/<int:doc_id>", methods=["PUT"])
+def api_kb_update(doc_id):
+    """Update an existing knowledge base document."""
+    data = request.get_json()
+    title = (data.get("title") or "").strip()
+    content = (data.get("content") or "").strip()
+    source = (data.get("source") or "").strip()
+    if not title or not content:
+        return jsonify({"error": "title and content are required"}), 400
+    conn = get_db()
+    conn.execute(
+        "UPDATE knowledge_docs SET title=?, content=?, source=?, updated_at=datetime('now') WHERE id=?",
+        (title, content, source or None, doc_id),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/kb/docs/<int:doc_id>", methods=["DELETE"])
+def api_kb_delete(doc_id):
+    """Delete a knowledge base document."""
+    conn = get_db()
+    conn.execute("DELETE FROM knowledge_docs WHERE id = ?", (doc_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({"ok": True})
+
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

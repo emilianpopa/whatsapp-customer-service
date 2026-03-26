@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block title %}Knowledge Base — ExpandHealth WhatsApp{% endblock %}
+
+{% block nav_stats %}
+<div class="stats" style="margin-left:auto;">
+    <span class="stat">{{ static_docs|length }} built-in</span>
+    <span class="stat">{{ db_docs|length }} custom</span>
+</div>
+{% endblock %}
+
+{% block content %}
+<style>
+    .kb-grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; min-height: 70vh; }
+    .kb-sidebar { background: white; border-radius: 8px; padding: 16px;
+                  box-shadow: 0 1px 3px rgba(0,0,0,0.08); align-self: start; }
+    .kb-sidebar h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;
+                     color: #667781; margin-bottom: 8px; margin-top: 16px; }
+    .kb-sidebar h3:first-child { margin-top: 0; }
+    .doc-item { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 14px;
+                color: #111b21; display: flex; align-items: center; gap: 8px; }
+    .doc-item:hover { background: #f0f2f5; }
+    .doc-item.active { background: #e7f8f4; color: #00a884; font-weight: 500; }
+    .doc-item .doc-badge { font-size: 10px; padding: 1px 6px; border-radius: 8px;
+                           background: #f0f2f5; color: #667781; margin-left: auto; flex-shrink: 0; }
+    .doc-item.active .doc-badge { background: #d9fdd3; color: #1b5e20; }
+
+    .kb-main { background: white; border-radius: 8px; padding: 24px;
+               box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .kb-main h2 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+    .kb-main .doc-meta { font-size: 12px; color: #667781; margin-bottom: 16px; }
+
+    .kb-content { font-size: 14px; line-height: 1.7; white-space: pre-wrap;
+                  background: #f8f9fa; padding: 16px; border-radius: 8px;
+                  max-height: 500px; overflow-y: auto; }
+    .kb-actions { display: flex; gap: 8px; margin-top: 16px; }
+
+    .edit-form { display: none; }
+    .edit-form input, .edit-form textarea {
+        width: 100%; padding: 10px 12px; border: 1px solid #e9edef;
+        border-radius: 8px; font-size: 14px; font-family: inherit;
+        margin-bottom: 10px; box-sizing: border-box;
+    }
+    .edit-form textarea { min-height: 300px; resize: vertical; font-family: monospace; }
+    .edit-form label { font-size: 12px; color: #667781; display: block; margin-bottom: 4px; }
+
+    .new-doc-btn { width: 100%; margin-top: 12px; padding: 8px; background: #00a884;
+                   color: white; border: none; border-radius: 6px; font-size: 13px;
+                   cursor: pointer; font-weight: 500; }
+    .new-doc-btn:hover { opacity: 0.9; }
+
+    .welcome { text-align: center; padding: 60px 20px; color: #667781; }
+    .welcome h3 { font-size: 20px; font-weight: 600; color: #111b21; margin-bottom: 8px; }
+
+    @media (max-width: 768px) {
+        .kb-grid { grid-template-columns: 1fr; }
+    }
+</style>
+
+<div class="kb-grid">
+    <!-- Sidebar -->
+    <div class="kb-sidebar">
+        {% if static_docs %}
+        <h3>Built-in Documents</h3>
+        {% for doc in static_docs %}
+        <div class="doc-item" id="static-{{ loop.index0 }}"
+             onclick="showStatic({{ loop.index0 }}, {{ doc|tojson }})">
+            {{ doc.title }}
+            <span class="doc-badge">built-in</span>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        <h3>Custom Documents</h3>
+        {% if db_docs %}
+        {% for doc in db_docs %}
+        <div class="doc-item" id="db-{{ doc.id }}"
+             onclick="showDb({{ doc.id }}, {{ doc|tojson }})">
+            {{ doc.title }}
+            <span class="doc-badge">custom</span>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div style="font-size:13px;color:#aaa;padding:8px 0;">No custom documents yet.</div>
+        {% endif %}
+
+        <button class="new-doc-btn" onclick="newDoc()">+ Add Document</button>
+    </div>
+
+    <!-- Main panel -->
+    <div class="kb-main" id="mainPanel">
+        <div class="welcome" id="welcomeState">
+            <h3>Knowledge Base</h3>
+            <p>Select a document from the sidebar to view or edit it.<br>
+               Click <strong>+ Add Document</strong> to create a new one.</p>
+            <p style="margin-top:16px;font-size:13px;">
+                All documents here are automatically included in the AI's context
+                when generating responses to WhatsApp messages.
+            </p>
+        </div>
+
+        <!-- View state -->
+        <div id="viewState" style="display:none;">
+            <h2 id="viewTitle"></h2>
+            <div class="doc-meta" id="viewMeta"></div>
+            <div class="kb-content" id="viewContent"></div>
+            <div class="kb-actions" id="viewActions"></div>
+        </div>
+
+        <!-- Edit / New state -->
+        <div id="editState" style="display:none;">
+            <h2 id="editHeading">Edit Document</h2>
+            <div class="edit-form" id="editForm" style="display:block;margin-top:16px;">
+                <label>Title</label>
+                <input type="text" id="editTitle" placeholder="e.g. Opening Hours">
+                <label>Source / Notes (optional)</label>
+                <input type="text" id="editSource" placeholder="e.g. Operations manual v2, last updated March 2026">
+                <label>Content (Markdown supported)</label>
+                <textarea id="editContent" placeholder="Write the document content here..."></textarea>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-approve" onclick="saveDoc()">Save Document</button>
+                    <button class="btn btn-edit" onclick="cancelEdit()">Cancel</button>
+                    <button class="btn btn-reject" id="deleteBtn" style="display:none;margin-left:auto;" onclick="deleteDoc()">Delete</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let _currentDocId = null;
+let _currentIsStatic = false;
+
+function clearActive() {
+    document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
+}
+
+function showStatic(idx, doc) {
+    clearActive();
+    document.getElementById('static-' + idx).classList.add('active');
+    _currentDocId = null;
+    _currentIsStatic = true;
+
+    document.getElementById('welcomeState').style.display = 'none';
+    document.getElementById('editState').style.display = 'none';
+    document.getElementById('viewState').style.display = 'block';
+
+    document.getElementById('viewTitle').textContent = doc.title;
+    document.getElementById('viewMeta').textContent = 'Built-in document — ' + doc.filename + ' (read-only)';
+    document.getElementById('viewContent').textContent = doc.content;
+    document.getElementById('viewActions').innerHTML =
+        '<span style="font-size:13px;color:#667781;">Built-in documents are managed via the codebase. Use custom documents for editable content.</span>';
+}
+
+function showDb(id, doc) {
+    clearActive();
+    document.getElementById('db-' + id).classList.add('active');
+    _currentDocId = id;
+    _currentIsStatic = false;
+
+    document.getElementById('welcomeState').style.display = 'none';
+    document.getElementById('editState').style.display = 'none';
+    document.getElementById('viewState').style.display = 'block';
+
+    document.getElementById('viewTitle').textContent = doc.title;
+    const meta = doc.source ? ('Source: ' + doc.source + ' · ') : '';
+    document.getElementById('viewMeta').textContent = meta + 'Updated: ' + (doc.updated_at || '—');
+    document.getElementById('viewContent').textContent = doc.content;
+    document.getElementById('viewActions').innerHTML =
+        '<button class="btn btn-edit" onclick="editDoc(' + id + ', ' + JSON.stringify(doc).replace(/</g,'\\u003c') + ')">Edit</button>' +
+        '<button class="btn btn-reject" onclick="deleteDoc(' + id + ')">Delete</button>';
+}
+
+function newDoc() {
+    clearActive();
+    _currentDocId = null;
+    _currentIsStatic = false;
+
+    document.getElementById('welcomeState').style.display = 'none';
+    document.getElementById('viewState').style.display = 'none';
+    document.getElementById('editState').style.display = 'block';
+    document.getElementById('editHeading').textContent = 'New Document';
+    document.getElementById('editTitle').value = '';
+    document.getElementById('editSource').value = '';
+    document.getElementById('editContent').value = '';
+    document.getElementById('deleteBtn').style.display = 'none';
+    document.getElementById('editTitle').focus();
+}
+
+function editDoc(id, doc) {
+    _currentDocId = id;
+    document.getElementById('welcomeState').style.display = 'none';
+    document.getElementById('viewState').style.display = 'none';
+    document.getElementById('editState').style.display = 'block';
+    document.getElementById('editHeading').textContent = 'Edit Document';
+    document.getElementById('editTitle').value = doc.title || '';
+    document.getElementById('editSource').value = doc.source || '';
+    document.getElementById('editContent').value = doc.content || '';
+    document.getElementById('deleteBtn').style.display = 'block';
+    document.getElementById('editTitle').focus();
+}
+
+function cancelEdit() {
+    document.getElementById('editState').style.display = 'none';
+    document.getElementById('welcomeState').style.display = 'block';
+    clearActive();
+}
+
+async function saveDoc() {
+    const title = document.getElementById('editTitle').value.trim();
+    const content = document.getElementById('editContent').value.trim();
+    const source = document.getElementById('editSource').value.trim();
+    if (!title || !content) { alert('Title and content are required.'); return; }
+
+    const isEdit = _currentDocId !== null;
+    const url = isEdit ? '/api/kb/docs/' + _currentDocId : '/api/kb/docs';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    const res = await fetch(url, {
+        method,
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title, content, source}),
+    });
+    if (res.ok) {
+        location.reload();
+    } else {
+        alert('Save failed: ' + await res.text());
+    }
+}
+
+async function deleteDoc(id) {
+    const docId = id || _currentDocId;
+    if (!docId) return;
+    if (!confirm('Delete this document? This cannot be undone.')) return;
+    const res = await fetch('/api/kb/docs/' + docId, {method: 'DELETE'});
+    if (res.ok) {
+        location.reload();
+    } else {
+        alert('Delete failed: ' + await res.text());
+    }
+}
+</script>
+{% endblock %}
